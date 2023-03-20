@@ -186,8 +186,14 @@ class PmhcWebApp:
 
         # self.upload_filename will be used by other class methods e.g. to retrieve upload_id
         self.upload_filename = f"{date_string}_round_{round_count}{user_file.suffix}"
+        logging.info(f"New dynamically generated round {round_count} filename is: '{self.upload_filename}'")
         upload_filepath = f"{self.uploads_folder}/{self.upload_filename}"
         shutil.copyfile(user_file, upload_filepath)
+
+        logging.info(
+            f"Uploading '{self.upload_filename}' to PMHC as a 'test' file, to capture error response\n"
+            "It usually takes about ~3 minutes for PMHC to process xlxs files, less for zipped csv's"
+        )
 
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=self.headless)
@@ -219,7 +225,7 @@ class PmhcWebApp:
             page.locator('[id="uploadBtn"]').click()
             delay = 60
             logging.info(
-                f"File should now be uploading to PMHC, waiting {delay} seconds..."
+                f"Uploading '{self.upload_filename}' to PMHC, waiting {delay} seconds..."
             )
             self.showLoadingBar(delay, description="Waiting for PMHC upload...")
 
