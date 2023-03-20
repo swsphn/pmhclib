@@ -73,28 +73,24 @@ class PmhcWebApp:
         password = os.getenv("PMHC_PASSWORD")
 
         if not username or not password:
+            username = input("Enter PMHC username: ")
+            password = getpass("Enter PMHC password: ")
             if platform.system() == "Windows":
                 logging.info(
-                    "Please set the following environment variables then re-run this script:\n"
+                    "In future, consider setting the following environment variables when running this script:\n"
                     "PMHC_USERNAME and PMHC_PASSWORD\n"
                     "To do so, run the following commands in PowerShell:\n"
                     "$env:PMHC_USERNAME='your_username_here'\n"
                     "$env:PMHC_PASSWORD=python -c 'import getpass; print(getpass.getpass())'"
                 )
-                raise SystemExit(1)
-
             elif platform.system() == "Linux":
                 logging.info(
-                    "Please set the following environment variables then re-run this script:\n"
+                    "In future, consider setting the following environment variables when running this script:\n"
                     "PMHC_USERNAME and PMHC_PASSWORD\n"
                     "To do so, run the following commands in Linux:\n"
                     "read PMHC_USERNAME && export PMHC_USERNAME\n"
                     "read -rs PMHC_PASSWORD && export PMHC_PASSWORD"
                 )
-                raise SystemExit(1)
-            else:
-                username = input("Enter PMHC username: ")
-                password = getpass("Enter PMHC password: ")
 
         logging.info("Logging into PMHC website")
 
