@@ -1,21 +1,14 @@
 # This class interacts with the PMHC website, tracking uploads and
 # their corresponding error JSON files.
 # The script uses Python Playwright to do this
-# error file for a given upload_id e.g. aa28791b
 # This script is useful when doing multiple error removal runs with remove_pmhc_mds_errors.py
 # as it saves time and ensures you always get the correct corresponding error file
 # Tested under Ubuntu WSL and PowerShell. --no-headless runs best under PowerShell
-#
-# Example usage:
-# poetry run python get_json_error_file.py aa28791b
 #
 # No login details are saved anywhere
 # To speed up usage when doing repeated calls, create the following local env variables:
 # PMHC_USERNAME
 # PMHC_PASSWORD
-#
-# adapted from:
-# https://thats-it-code.com/playwright/playwright__find-locate-search-elements-tags/#playwright-get-the-parent-element
 #
 # Good tute on persistent Playwright browsing
 # https://www.youtube.com/watch?v=JMq8ImhDih0
@@ -260,7 +253,7 @@ class PmhcWebApp:
                 delay, description=f"{counter} - Waiting for PMHC processing..."
             )
             counter += 1
-            
+
     def download_error_json(self, upload_id: str) -> Path:
         """Downloads a JSON error file from PMHC
         This is useful for matching against uploaded files and processing
