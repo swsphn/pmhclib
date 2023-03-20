@@ -40,7 +40,7 @@ class InvalidPmhcUploadId(Exception):
 
 
 class PmhcWebApp:
-    # class variables
+    # class properties
     headless = True  # default value, can be overridden
     user_info = None
     upload_filename = None
