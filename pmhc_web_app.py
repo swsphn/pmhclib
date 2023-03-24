@@ -18,13 +18,13 @@ import os
 import platform
 import shutil
 import time
-from datetime import datetime
+from datetime import datetime, date
 from getpass import getpass
 from pathlib import Path
 
 from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright
-from rich.progress import track
+from rich.progress import track, Progress, TimeElapsedColumn
 
 
 class FileNotFoundException(Exception):
@@ -49,6 +49,7 @@ class PmhcWebApp:
     STATE = Path("./DO_NOT_COMMIT/state.json")  # save browser session state
     downloads_folder = Path("downloads")  # default value, can be overridden
     uploads_folder = Path("uploads")  # default value, can be overridden
+    organisation_path = "PHN105"
     default_timeout = 60000
 
     def __init__(self, downloads_folder: Path, uploads_folder: Path, headless: bool):
@@ -488,3 +489,124 @@ class PmhcWebApp:
             msg (str, optional): Message to the user. Defaults to above value.
         """
         input(f"\n{msg}")
+
+    def download_pmhc_mds(
+        self,
+        output_directory: Path = None,
+        start_date: date = None,
+        end_date: date = None,
+        organisation_path: str = "PHN105",
+    ) -> Path:
+        """Extract PMHC MDS Data within the date range. If no date range is given,
+        start_date defaults to 01/01/2016 and end_date defaults to the current date.
+
+        Output file is saved to output_directory. (self.downloads_folder by default)
+
+        If an extract with matching date range and organisation_path has already been
+        generated, we download it rather than queuing a new download.
+
+        Else if an extract with matching date range and organisation_path has already been
+        queued, but is not ready to download, we wait for the queued extract to become
+        ready rather than queuing a new download.
+
+        Otherwise, we queue a new extract and wait for it to become ready.
+        """
+
+        if output_directory is None:
+            output_directory = self.downloads_folder
+
+        if start_date is None:
+            start_date = date(2016, 1, 1)
+
+        if end_date is None:
+            end_date = date.today()
+
+        def match_downloads(pmhc_download):
+            """Return True if a download record has matching organisation_path and
+            date range.
+            """
+            pmhc_start_date = date.fromisoformat(pmhc_download["params"]["start_date"])
+            pmhc_end_date = date.fromisoformat(pmhc_download["params"]["end_date"])
+            pmhc_org_path = pmhc_download["organisation"]["organisation_path"]
+            return (
+                pmhc_org_path == organisation_path
+                and pmhc_start_date == start_date
+                and pmhc_end_date == end_date
+            )
+
+        def match_completed_downloads(pmhc_download):
+            """Return True if a download record is completed and has matching
+            organisation_path and date range.
+            """
+            matched = match_downloads(pmhc_download)
+            completed = pmhc_download["status"] == "Completed"
+            return matched and completed
+
+        # Wait for queued download to be processed
+        with Progress(*Progress.get_default_columns(), TimeElapsedColumn()) as progress:
+            extract_task = progress.add_task("Checking for PMHC extract...", total=None)
+
+            with sync_playwright() as p:
+                browser = p.chromium.launch(headless=self.headless)
+                context = browser.new_context(storage_state=self.STATE)
+                context.set_default_timeout(self.default_timeout)
+                page = context.new_page()
+
+                while True:
+                    # Get list of recently requested data extracts
+                    logging.debug("Looping to look for data extracts")
+                    downloads = page.request.get(
+                        "https://pmhc-mds.net/api/extract",
+                        params={"sort": "-date"},
+                    ).json()
+
+                    completed_downloads = filter(match_completed_downloads, downloads)
+                    latest_completed_download = next(completed_downloads, None)
+                    matching_downloads = filter(match_downloads, downloads)
+                    latest_matching_download = next(matching_downloads, None)
+
+                    if latest_completed_download:
+                        # Just use the pre-existing download
+                        logging.info("Extract ready")
+                        download_uuid = latest_completed_download["uuid"]
+                        break
+                    elif latest_matching_download:
+                        # Wait for pre-queued download to become ready
+                        progress.update(
+                            extract_task, description="Waiting for extract..."
+                        )
+                        wait_time = 30
+                        time.sleep(wait_time)
+                    else:
+                        # Queue download from PMHC
+                        progress.update(extract_task, description="Queuing extract...")
+                        page.request.get(
+                            "https://pmhc-mds.net/api/extract/csv",
+                            params={
+                                "organisation_path": f"{self.organisation_path}",
+                                "encoded_organisation_path": f"{self.organisation_path}",
+                                "file_type": "csv",
+                                "start_date": f"{start_date:%Y-%m-%d}",
+                                "end_date": f"{end_date:%Y-%m-%d}",
+                                "childless": "false",
+                                "all_episode_children": "false",
+                                "metaspec": "false",
+                                "multiple_delivery_orgs": "false",
+                                "all_commissioned_organisations": "false",
+                            },
+                        )
+
+                download_url_json = page.request.get(
+                    f"https://pmhc-mds.net/api/extract/{download_uuid}/fetch"
+                ).json()
+                download_url = download_url_json["location"]
+
+                download = page.request.get(download_url)
+                output_file = (
+                    output_directory / f"PMHC_extract_{start_date}_{end_date}.zip"
+                )
+                logging.info(f"Saving output to {output_file}")
+                with open(output_file, "wb") as fp:
+                    fp.write(download.body())
+
+                return output_file
