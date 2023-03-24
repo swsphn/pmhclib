@@ -413,6 +413,7 @@ class PmhcWebApp:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=self.headless)
             context = browser.new_context(storage_state=self.STATE)
+            context.set_default_timeout(self.default_timeout)
             page = context.new_page()
 
             # Open the PMHC 'View Uploads' page
