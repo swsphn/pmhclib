@@ -49,6 +49,7 @@ class PmhcWebApp:
     STATE = Path("./DO_NOT_COMMIT/state.json")  # save browser session state
     downloads_folder = Path("downloads")  # default value, can be overridden
     uploads_folder = Path("uploads")  # default value, can be overridden
+    default_timeout = 60000
 
     def __init__(self, downloads_folder: Path, uploads_folder: Path, headless: bool):
         # save whether to use a headless browser instance or not
@@ -61,7 +62,7 @@ class PmhcWebApp:
         self.uploads_folder.mkdir(parents=True, exist_ok=True)
 
         # login to PMHC and save browser session state for later use
-        self.login()
+        #self.login()
 
     def login(self):
         """Logs in to PMHC website and saves the Playwright state
@@ -97,6 +98,7 @@ class PmhcWebApp:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=self.headless)
             context = browser.new_context()
+            context.set_default_timeout(self.default_timeout)
             page = context.new_page()
 
             # login to PMHC website
@@ -135,6 +137,7 @@ class PmhcWebApp:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=self.headless)
             context = browser.new_context(storage_state=self.STATE)
+            context.set_default_timeout(self.default_timeout)
             page = context.new_page()
             page.goto(url)
             page.wait_for_load_state()
@@ -185,7 +188,7 @@ class PmhcWebApp:
         date_string = now.strftime("%Y%m%d_%H%M%S")
 
         # self.upload_filename will be used by other class methods e.g. to retrieve upload_id
-        self.upload_filename = f"{date_string}_round_{round_count}{user_file.suffix}"
+        self.upload_filename = f"{user_file.stem}_{date_string}_round_{round_count}{user_file.suffix}"
         logging.info(f"New dynamically generated round {round_count} filename is: '{self.upload_filename}'")
         upload_filepath = f"{self.uploads_folder}/{self.upload_filename}"
         shutil.copyfile(user_file, upload_filepath)
@@ -198,6 +201,7 @@ class PmhcWebApp:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=self.headless)
             context = browser.new_context(storage_state=self.STATE)
+            context.set_default_timeout(self.default_timeout)
             page = context.new_page()
             page.goto("https://pmhc-mds.net/#/upload/add")
             page.wait_for_load_state()
@@ -272,6 +276,7 @@ class PmhcWebApp:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=self.headless)
             context = browser.new_context(storage_state=self.STATE)
+            context.set_default_timeout(self.default_timeout)
             page = context.new_page()
 
             # first we need to get the uuid e.g. 94edf5e3-36b1-46d3-9178-bf3b142da6a1
@@ -337,6 +342,7 @@ class PmhcWebApp:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=self.headless)
             context = browser.new_context(storage_state=self.STATE)
+            context.set_default_timeout(self.default_timeout)
             page = context.new_page()
             page.goto(url)
             page.wait_for_load_state()
