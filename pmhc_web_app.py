@@ -62,7 +62,7 @@ class PmhcWebApp:
         self.uploads_folder.mkdir(parents=True, exist_ok=True)
 
         # login to PMHC and save browser session state for later use
-        #self.login()
+        # self.login()
 
     def login(self):
         """Logs in to PMHC website and saves the Playwright state
@@ -145,12 +145,15 @@ class PmhcWebApp:
 
             return page_content
 
-    def upload_file(self, user_file: Path, round_count: int) -> Path:
+    def upload_file(
+        self, user_file: Path, round_count: int, mode: str = "test"
+    ) -> Path:
         """Uploads a user specified file to PMHC website
 
         Args:
             user_file (Path): path to the file e.g. 'PMHC_MDS_20230101_20230131.xlsx'
             round_count (int): What round of file this is e.g. 1, 2, 3 etc
+            mode (str): Upload in 'test' or 'live' mode? Defaults to 'test'. Use 'live' with care!
 
         Raises:
             IncorrectFileType: If user uploads a bad filetype
@@ -188,13 +191,17 @@ class PmhcWebApp:
         date_string = now.strftime("%Y%m%d_%H%M%S")
 
         # self.upload_filename will be used by other class methods e.g. to retrieve upload_id
-        self.upload_filename = f"{user_file.stem}_{date_string}_round_{round_count}{user_file.suffix}"
-        logging.info(f"New dynamically generated round {round_count} filename is: '{self.upload_filename}'")
+        self.upload_filename = (
+            f"{user_file.stem}_{date_string}_round_{round_count}{user_file.suffix}"
+        )
+        logging.info(
+            f"New dynamically generated round {round_count} filename is: '{self.upload_filename}'"
+        )
         upload_filepath = f"{self.uploads_folder}/{self.upload_filename}"
         shutil.copyfile(user_file, upload_filepath)
 
         logging.info(
-            f"Uploading '{self.upload_filename}' to PMHC as a 'test' file, to capture error response\n"
+            f"Uploading '{self.upload_filename}' to PMHC as a '{mode}' file\n"
             "It usually takes about ~3 minutes for PMHC to process xlxs files, less for zipped csv's"
         )
 
@@ -206,8 +213,12 @@ class PmhcWebApp:
             page.goto("https://pmhc-mds.net/#/upload/add")
             page.wait_for_load_state()
 
-            logging.info("Clicking 'Upload as test data' checkbox")
-            page.locator('[id="testUploadCheckbox"]').click()
+            # upload in 'live' (e.g. completed file) or 'test' mode (error file)?
+            if mode == "live":
+                logging.info("Uploading in 'live' mode")
+            else:
+                logging.info("Uploading in 'test' mode, clicking checkbox")
+                page.locator('[id="testUploadCheckbox"]').click()
 
             logging.info("Selecting Organisation: SWSPHN")
             # page.locator('"South Western Sydney ( PHN105 )"').click()
@@ -239,7 +250,7 @@ class PmhcWebApp:
             return self.upload_filename
 
     def wait_for_upload(self):
-        """Waits for a PMHC upload to complete processing"""
+        """Waits for a PMHC upload to complete processing in 'test' mode"""
 
         # delay between each check of PMHC Uploads page
         delay = 30
@@ -252,7 +263,9 @@ class PmhcWebApp:
                     f"An upload is currently processing for '{self.get_pmhc_username()}' account, waiting for {delay} seconds..."
                 )
             else:
-                logging.info("No upload is processing, we can stop waiting now")
+                logging.info(
+                    "No upload is processing in 'test' mode, so we can stop waiting now"
+                )
                 break
 
             self.showLoadingBar(
@@ -303,7 +316,7 @@ class PmhcWebApp:
             # We'll need to make this more robust in the near future if
             # we start getting multiple files coming back
             return Path(filename)
-        
+
     def showLoadingBar(self, delay: int, description: str):
         """Shows a loading bar for a given amount of seconds
         This is useful for delaying a script e.g. whilst a PMHC
