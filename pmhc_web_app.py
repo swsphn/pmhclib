@@ -74,8 +74,6 @@ class PmhcWebApp:
         password = os.getenv("PMHC_PASSWORD")
 
         if not username or not password:
-            username = input("Enter PMHC username: ")
-            password = getpass("Enter PMHC password: ")
             if platform.system() == "Windows":
                 logging.info(
                     "In future, consider setting the following environment variables when running this script:\n"
@@ -92,6 +90,8 @@ class PmhcWebApp:
                     "read PMHC_USERNAME && export PMHC_USERNAME\n"
                     "read -rs PMHC_PASSWORD && export PMHC_PASSWORD"
                 )
+            username = input("Enter PMHC username: ")
+            password = getpass("Enter PMHC password: ")
 
         logging.info("Logging into PMHC website")
 
@@ -183,7 +183,7 @@ class PmhcWebApp:
         # This usually only occurs if the user is also using their browser to upload
         # manually at the same time as running this script
         # skip this check for live files which just need to be uploaded, they don't
-        # need to have matching done for JSON error file retrieval 
+        # need to have matching done for JSON error file retrieval
         if mode == "test":
             self.wait_for_upload()
 
