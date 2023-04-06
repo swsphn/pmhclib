@@ -1,9 +1,10 @@
 # This class interacts with the PMHC website, tracking uploads and
 # their corresponding error JSON files.
 # The script uses Python Playwright to do this
-# This script is useful when doing multiple error removal runs with remove_pmhc_mds_errors.py
-# as it saves time and ensures you always get the correct corresponding error file
-# Tested under Ubuntu WSL and PowerShell. --no-headless runs best under PowerShell
+# This script is useful when doing multiple error removal runs with
+# remove_pmhc_mds_errors.py as it saves time and ensures you always get the correct
+# corresponding error file. Tested under Ubuntu WSL and PowerShell.
+# --no-headless runs best under PowerShell
 #
 # No login details are saved anywhere
 # To speed up usage when doing repeated calls, create the following local env variables:
@@ -76,7 +77,8 @@ class PmhcWebApp:
         if not username or not password:
             if platform.system() == "Windows":
                 logging.info(
-                    "In future, consider setting the following environment variables when running this script:\n"
+                    "In future, consider setting the following environment variables "
+                    "when running this script:\n"
                     "PMHC_USERNAME and PMHC_PASSWORD\n"
                     "To do so, run the following commands in PowerShell:\n"
                     "$env:PMHC_USERNAME='your_username_here'\n"
@@ -84,7 +86,8 @@ class PmhcWebApp:
                 )
             elif platform.system() == "Linux":
                 logging.info(
-                    "In future, consider setting the following environment variables when running this script:\n"
+                    "In future, consider setting the following environment variables "
+                    "when running this script:\n"
                     "PMHC_USERNAME and PMHC_PASSWORD\n"
                     "To do so, run the following commands in Linux:\n"
                     "read PMHC_USERNAME && export PMHC_USERNAME\n"
@@ -153,7 +156,8 @@ class PmhcWebApp:
         Args:
             user_file (Path): path to the file e.g. 'PMHC_MDS_20230101_20230131.xlsx'
             round_count (int): What round of file this is e.g. 1, 2, 3 etc
-            mode (str): Upload in 'test' or 'live' mode? Defaults to 'test'. Use 'live' with care!
+            mode (str): Upload in 'test' or 'live' mode? Defaults to 'test'.
+            Use 'live' with care!
 
         Raises:
             IncorrectFileType: If user uploads a bad filetype
@@ -168,7 +172,8 @@ class PmhcWebApp:
         # check file looks ok
         if user_file.suffix != ".xlsx" and user_file.suffix != ".zip":
             logging.error(
-                "Only .xlsx or .zip (containing multiple csv's) are acceptable PMHC input files"
+                "Only .xlsx or .zip (containing multiple csv's) are acceptable PMHC "
+                "input files"
             )
             raise IncorrectFileType
 
@@ -187,13 +192,15 @@ class PmhcWebApp:
         if mode == "test":
             self.wait_for_upload()
 
-        # copy and rename the user file so we can find it again when it is uploaded to PMHC
+        # copy and rename the user file so we can find it again when it is uploaded
+        # to PMHC
         # new filename should be in the format of:
         # YYYYMMDD_HHMMSS_round1.xlxs
         now = datetime.now()
         date_string = now.strftime("%Y%m%d_%H%M%S")
 
-        # self.upload_filename will be used by other class methods e.g. to retrieve upload_id
+        # self.upload_filename will be used by other class methods
+        # e.g. to retrieve upload_id
         self.upload_filename = (
             f"{user_file.stem}_{date_string}_round_{round_count}{user_file.suffix}"
         )
@@ -205,7 +212,8 @@ class PmhcWebApp:
 
         logging.info(
             f"Uploading '{self.upload_filename}' to PMHC as a '{mode}' file\n"
-            "It usually takes about ~3 minutes for PMHC to process xlxs files, less for zipped csv's"
+            "It usually takes about ~3 minutes for PMHC to process xlxs files, "
+            "less for zipped csv's"
         )
 
         with sync_playwright() as p:
@@ -263,7 +271,8 @@ class PmhcWebApp:
             # check to see if the PMHC upload queue is free
             if self.is_upload_processing():
                 logging.info(
-                    f"An upload is currently processing for '{self.get_pmhc_username()}' account, waiting for {delay} seconds..."
+                    f"An upload is currently processing for '{self.get_pmhc_username()}' "
+                    "account, waiting for {delay} seconds..."
                 )
             else:
                 logging.info(
@@ -340,7 +349,8 @@ class PmhcWebApp:
     def get_pmhc_username(self) -> str:
         """Gets the PMHC username of the current logged in user
         e.g. jonathans1
-        Note that this may differ to the env var PMHC_USERNAME which could be an email address
+        Note that this may differ to the env var PMHC_USERNAME which could be an
+        email address
         Returns:
             str: PMHC username
         """
@@ -350,7 +360,8 @@ class PmhcWebApp:
         """gets the JSON response for a given request to PMHC website
 
         Args:
-            url (str): the PMHC API url to query e.g. https://pmhc-mds.net/api/current-user
+            url (str): the PMHC API url to query
+            e.g. https://pmhc-mds.net/api/current-user
 
         Returns:
             str: A string containing the JSON reponse from the request
@@ -372,7 +383,8 @@ class PmhcWebApp:
         Returns:
             bool: True if an upload is currently processing
         """
-        # Get a list of all this user's 'test' uploads ('processing', 'complete' and 'error' status)
+        # Get a list of all this user's 'test' uploads ('processing', 'complete'
+        # and 'error' status)
         pmhc_username = self.get_pmhc_username()
         json_list = self.get_request(
             f"https://pmhc-mds.net/api/uploads?test=1&username={pmhc_username}&sort=-date"
@@ -398,7 +410,8 @@ class PmhcWebApp:
         """Finds an upload_id for a given PMHC upload filename
 
         Args:
-            pmhc_filename (str): The PMHC filename to search for e.g. 20230320_094815_round_1.xlsx
+            pmhc_filename (str): The PMHC filename to search for
+            e.g. 20230320_094815_round_1.xlsx
 
         Raises:
             InvalidPmhcUploadId: Raises error if upload_id cannot be found
@@ -457,7 +470,8 @@ class PmhcWebApp:
                 self.upload_status = spans[-1].text
             else:
                 logging.error(
-                    f"Could not retrieve a valid PMHC upload_id for filename: '{pmhc_filename}'"
+                    "Could not retrieve a valid PMHC upload_id for filename: "
+                    f"'{pmhc_filename}'"
                 )
                 raise InvalidPmhcUploadId
 
