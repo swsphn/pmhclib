@@ -205,7 +205,8 @@ class PmhcWebApp:
             f"{user_file.stem}_{date_string}_round_{round_count}{user_file.suffix}"
         )
         logging.info(
-            f"New dynamically generated round {round_count} filename is: '{self.upload_filename}'"
+            f"New dynamically generated round {round_count} filename is: "
+            f"'{self.upload_filename}'"
         )
         upload_filepath = f"{self.uploads_folder}/{self.upload_filename}"
         shutil.copyfile(user_file, upload_filepath)
@@ -272,11 +273,12 @@ class PmhcWebApp:
             if self.is_upload_processing():
                 logging.info(
                     f"An upload is currently processing for '{self.get_pmhc_username()}' "
-                    "account, waiting for {delay} seconds..."
+                    f"account, waiting for {delay} seconds..."
                 )
             else:
                 logging.info(
-                    "No upload is processing in 'test' mode, so we can stop waiting now"
+                    f"No upload is processing for '{self.get_pmhc_username()}', so we "
+                    "can stop waiting now"
                 )
                 break
 
@@ -339,7 +341,7 @@ class PmhcWebApp:
             description (str): Descriptive text to show user
         """
         # simulate some work being done to progress our loading bar
-        for i in track(range(delay), description=description):
+        for _i in track(range(delay), description=description):
             time.sleep(1)
 
     def get_user_info(self, name: str) -> str:
@@ -378,8 +380,9 @@ class PmhcWebApp:
             return user_query.json()
 
     def is_upload_processing(self) -> bool:
-        """Checks if the user has an upload currently 'processing'
-        Useful for checking before we do certain actions e.g. upload another file
+        """Checks if the user has an upload currently 'processing' in either live or
+        test mode. Useful for checking before we do certain actions e.g. try upload
+        another file, because this script can only handle one 'processing' file at a time
         Returns:
             bool: True if an upload is currently processing
         """
@@ -387,9 +390,8 @@ class PmhcWebApp:
         # and 'error' status)
         pmhc_username = self.get_pmhc_username()
         json_list = self.get_request(
-            f"https://pmhc-mds.net/api/uploads?test=1&username={pmhc_username}&sort=-date"
+            f"https://pmhc-mds.net/api/uploads?username={pmhc_username}&sort=-date"
         )
-
         # see if any are in a 'processing' state
         for json in json_list:
             if "status" in json and json["status"] == "processing":
