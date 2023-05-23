@@ -13,7 +13,6 @@
 #
 # Good tute on persistent Playwright browsing
 # https://www.youtube.com/watch?v=JMq8ImhDih0
-
 import logging
 import os
 import platform
@@ -38,6 +37,10 @@ class IncorrectFileType(Exception):
 
 class InvalidPmhcUploadId(Exception):
     """Custom error handler for when we cannot find a PMHC upload_id"""
+
+
+class InvalidPmhcLogin(Exception):
+    """Custom error handler for when a PMHC login is unsuccessful"""
 
 
 class PmhcWebApp:
@@ -76,7 +79,7 @@ class PmhcWebApp:
 
         if not username or not password:
             if platform.system() == "Windows":
-                logging.info(
+                logging.debug(
                     "In future, consider setting the following environment variables "
                     "when running this script:\n"
                     "PMHC_USERNAME and PMHC_PASSWORD\n"
@@ -85,7 +88,7 @@ class PmhcWebApp:
                     "$env:PMHC_PASSWORD=python -c 'import getpass; print(getpass.getpass())'"
                 )
             elif platform.system() == "Linux":
-                logging.info(
+                logging.debug(
                     "In future, consider setting the following environment variables "
                     "when running this script:\n"
                     "PMHC_USERNAME and PMHC_PASSWORD\n"
@@ -94,7 +97,7 @@ class PmhcWebApp:
                     "read -rs PMHC_PASSWORD && export PMHC_PASSWORD"
                 )
             username = input("Enter PMHC username: ")
-            password = getpass("Enter PMHC password: ")
+            password = getpass("Enter PMHC password (keyboard input will be hidden): ")
 
         logging.info("Logging into PMHC website")
 
@@ -123,6 +126,14 @@ class PmhcWebApp:
             # username, roles, user_agent, uuid etc
             user_query = page.request.get("https://pmhc-mds.net/api/current-user")
             self.user_info = user_query.json()
+
+            # error key will be present if login was unsuccessful
+            if "error" in self.user_info:
+                logging.error(
+                    "PMHC login was unsuccessful. Are you sure you entered "
+                    "correct credentials?"
+                )
+                raise InvalidPmhcLogin
 
             # Save storage state into file
             context.storage_state(path=self.STATE)
@@ -195,7 +206,7 @@ class PmhcWebApp:
         # copy and rename the user file so we can find it again when it is uploaded
         # to PMHC
         # new filename should be in the format of:
-        # YYYYMMDD_HHMMSS_round1.xlxs
+        # YYYYMMDD_HHMMSS_round1.xlsx
         now = datetime.now()
         date_string = now.strftime("%Y%m%d_%H%M%S")
 
@@ -213,7 +224,7 @@ class PmhcWebApp:
 
         logging.info(
             f"Uploading '{self.upload_filename}' to PMHC as a '{mode}' file\n"
-            "It usually takes about ~3 minutes for PMHC to process xlxs files, "
+            "It usually takes about ~3 minutes for PMHC to process xlsx files, "
             "less for zipped csv's"
         )
 
@@ -277,8 +288,8 @@ class PmhcWebApp:
                 )
             else:
                 logging.info(
-                    f"No upload is processing for '{self.get_pmhc_username()}', so we "
-                    "can stop waiting now"
+                    f"No upload is processing for '{self.get_pmhc_username()}' account, "
+                    "so we can stop waiting now"
                 )
                 break
 
@@ -495,11 +506,3 @@ class PmhcWebApp:
                 "self.find_upload_id() has been called first before calling this method"
             )
             raise InvalidPmhcUploadId
-
-    def pause(self, msg="\nPress ENTER to continue or CTRL + C to quit..."):
-        """Helps the user read messages or errors before Python continues on
-
-        Args:
-            msg (str, optional): Message to the user. Defaults to above value.
-        """
-        input(f"\n{msg}")
