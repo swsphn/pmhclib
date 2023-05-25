@@ -16,7 +16,9 @@
 import logging
 import os
 import platform
+import random
 import shutil
+import sqlite3
 import time
 from datetime import datetime
 from getpass import getpass
@@ -39,8 +41,12 @@ class InvalidPmhcUploadId(Exception):
     """Custom error handler for when we cannot find a PMHC upload_id"""
 
 
-class InvalidPmhcLogin(Exception):
+class InvalidPmhcUser(Exception):
     """Custom error handler for when a PMHC login is unsuccessful"""
+
+
+class MissingPmhcElement(Exception):
+    """Custom error handler for when PMHC page returns incorrect Playwright element"""
 
 
 class PmhcWebApp:
@@ -53,11 +59,21 @@ class PmhcWebApp:
     STATE = Path("./DO_NOT_COMMIT/state.json")  # save browser session state
     downloads_folder = Path("downloads")  # default value, can be overridden
     uploads_folder = Path("uploads")  # default value, can be overridden
+    start_time = None
     default_timeout = 60000
+    db_conn = None  # sqlite database connection object
+    db_file = "pmhc_web_app.db"
 
-    def __init__(self, downloads_folder: Path, uploads_folder: Path, headless: bool):
+    def __init__(
+        self,
+        downloads_folder: Path,
+        uploads_folder: Path,
+        start_time: datetime,
+        headless: bool,
+    ):
         # save whether to use a headless browser instance or not
         self.headless = headless
+        self.start_time = start_time
 
         # create required folders on disk
         state_folder = self.STATE.parent
@@ -65,8 +81,184 @@ class PmhcWebApp:
         self.downloads_folder.mkdir(parents=True, exist_ok=True)
         self.uploads_folder.mkdir(parents=True, exist_ok=True)
 
+        # setup sqlite database for saving/resuming PMHC uploads
+        self.db_setup()
+
         # login to PMHC and save browser session state for later use
         # self.login()
+
+    def db_setup(self):
+        # Setup sqlite database
+        self.db_conn = sqlite3.connect(self.db_file)
+
+        # startime, filename, rounds, savepoints (see savepoints_for_gui_testing.txt)
+        sql = """
+        CREATE TABLE IF NOT EXISTS save_points
+            (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                upload_id TEXT NOT NULL,
+                input_file TEXT NOT NULL,
+                round_count INTEGER NOT NULL,
+                start_time DATETIME,
+                processing_time INTEGER NOT NULL
+            )
+        """
+        self.db_conn.execute(sql)
+
+    def db_create_save_point(
+        self,
+        upload_id: str,
+        input_file: Path,
+        round_count: int,
+        start_time: datetime,
+        processing_time: int,
+    ) -> int:
+        """Creates a new save point which the user can resume from in future
+
+        Args:
+            upload_id (str): PMHC upload_id e.g. 09cbed58
+            input_file (Path): PMHC input_file e.g. PMHC_MDS_20230101_20230512.xlsx
+            round_count (int): which round the user is currently up to e.g. 2
+            start_time (datetime): start_time when script started
+            e.g. 2023-05-24 11:35:55.926231
+            processing_time (int): number of seconds it took PMHC to process the file
+
+        Returns:
+            int: the id of the new save_point
+        """
+        # strip off everything but the filename from input_file, e.g. remove C:\test\
+        input_file_stripped = input_file.name
+
+        insert_sql = (
+            "INSERT INTO save_points (upload_id, input_file, round_count, start_time, "
+            "processing_time) "
+            f"VALUES ('{upload_id}', '{input_file_stripped}', '{round_count}', "
+            f"'{start_time}', '{processing_time}')"
+        )
+
+        try:
+            cursor = self.db_conn.execute(insert_sql)
+            self.db_conn.commit()
+            save_point_id = cursor.lastrowid
+        except sqlite3.Error as e:
+            # Handle the SQLite error
+            logging.exception("SQLite Error: %s", e)
+
+        return save_point_id
+
+    def db_get_save_point(self, save_point_id: int) -> dict:
+        """Gets a particular save_point for a given save_point_id
+
+        Args:
+            id (int): save_point_id e.g. 2
+
+        Returns:
+            dict: returns a dictionary with fields from save_points table
+        """
+
+        select_sql = (
+            "SELECT id, upload_id, input_file, round_count, "
+            "strftime('%d/%m/%Y %H:%M', start_time) as start_time, processing_time "
+            f"FROM save_points WHERE id = '{save_point_id}' LIMIT 1"
+        )
+
+        cursor = self.db_conn.execute(select_sql)
+        row = cursor.fetchone()
+
+        if row is None:
+            return {}
+        else:
+            columns = [
+                "id",
+                "upload_id",
+                "input_file",
+                "round_count",
+                "start_time",
+                "processing_time",
+            ]
+            result_dict = dict(zip(columns, row))
+            return result_dict
+
+    def db_get_save_points(self, input_file: Path) -> dict:
+        """gets all the savepoints for a given input_file
+
+        Args:
+            input_file (Path): PMHC input_file e.g. PMHC_MDS_20230101_20230512.xlsx
+
+        Returns:
+            dict: dictionary containing rows from save_points table
+        """
+
+        # strip off everything but the filename from input_file, e.g. remove C:\test\
+        input_file_stripped = input_file.name
+
+        select_sql = (
+            "SELECT id, upload_id, input_file, round_count, "
+            "strftime('%d/%m/%Y %H:%M', start_time) as start_time, processing_time "
+            f"FROM save_points WHERE input_file = '{input_file_stripped}' "
+            "ORDER BY id ASC"
+        )
+
+        cursor = self.db_conn.execute(select_sql)
+        rows = cursor.fetchall()
+
+        # Convert the fetched rows to a dictionary
+        columns = [
+            "id",
+            "upload_id",
+            "input_file",
+            "round_count",
+            "start_time",
+            "processing_time",
+        ]
+        result_dict = [dict(zip(columns, row)) for row in rows]
+
+        return result_dict
+
+    def random_delay(self, min: int = 1, max: int = 3):
+        """Delays the script for a random number of seconds
+        Useful in slowing down playwright to make it look more human-like and not
+        upset PMHC website which appears to dislike too much login page activity
+
+        Args:
+            min (int, optional): minimum delay in seconds. Defaults to 1.
+            max (int, optional): maximum delay in seconds. Defaults to 3.
+
+        """
+        random_number = random.uniform(min, max)
+        time.sleep(random_number)
+
+    def is_logged_in(self) -> bool:
+        """check if we already have an existing PMHC login session active we can use
+
+        Returns:
+            bool: True if logged in
+        """
+        # First check if state file exists. It won't exist if this is the first time
+        # user has run script, as it only gets created when self.login() is called
+        if not os.path.exists(self.STATE):
+            return False
+
+        # check against PMHC website if session saved in self.STATE is still valid
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=self.headless)
+            context = browser.new_context(storage_state=self.STATE)
+            context.set_default_timeout(self.default_timeout)
+            page = context.new_page()
+            page.goto("https://pmhc-mds.net")
+            page.wait_for_load_state()
+            self.random_delay()
+
+            # Detect this element which should only exist for logged in users:
+            # <span id="currentUserText" class="ng-binding">
+            element_exists = page.locator("#currentUserText").is_visible()
+            if element_exists:
+                logged_in = True
+            else:
+                logged_in = False
+
+            browser.close()
+            return logged_in
 
     def login(self):
         """Logs in to PMHC website and saves the Playwright state
@@ -109,21 +301,40 @@ class PmhcWebApp:
 
             # login to PMHC website
             page.goto("https://pmhc-mds.net")
-            time.sleep(1)
+            self.random_delay()
             logging.info("Clicking 'Sign in' button")
             page.locator('[id="loginBtn"]').click()
-
+            self.random_delay()
             logging.info("Filling in user credentials")
             page.type('input[id="username"]', username)
             page.type('input[id="password"]', password)
-            page.locator('[name="action"]').click()
-            page.wait_for_load_state()
-            time.sleep(1)
 
-            # save info about the logged in user eg:
-            # email:    jonathan.stucken@swsphn.com.au
-            # id:       3826
-            # username, roles, user_agent, uuid etc
+            # target the 'Continue' submit button. Note from 25/05/2023 there are now
+            # two of them: the first hidden one (a decoy!), the second visible
+            # one (real). We need to isolate the correct one based on its parent div
+            buttons = page.locator(
+                "button[type='submit'][name='action'][value='default']"
+                "[data-action-button-primary='true']"
+            ).all()
+
+            # find the real 'Continue' button which isn't hidden, determined by the
+            # parent div class="c79fd81e4"
+            if buttons:
+                for button in buttons:
+                    # click the correct button
+                    parent_div_class = button.evaluate(
+                        '(element) => element.parentNode.getAttribute("class")'
+                    )
+                    if parent_div_class == "c79fd81e4":
+                        button.click()
+            else:
+                logging.error("Could not find 'Continue' button on login page")
+                raise MissingPmhcElement
+
+            page.wait_for_load_state()
+            self.random_delay()
+
+            # confirm login was successful
             user_query = page.request.get("https://pmhc-mds.net/api/current-user")
             self.user_info = user_query.json()
 
@@ -133,7 +344,7 @@ class PmhcWebApp:
                     "PMHC login was unsuccessful. Are you sure you entered "
                     "correct credentials?"
                 )
-                raise InvalidPmhcLogin
+                raise InvalidPmhcUser
 
             # Save storage state into file
             context.storage_state(path=self.STATE)
@@ -224,8 +435,9 @@ class PmhcWebApp:
 
         logging.info(
             f"Uploading '{self.upload_filename}' to PMHC as a '{mode}' file\n"
-            "It usually takes about ~3 minutes for PMHC to process xlsx files, "
-            "less for zipped csv's"
+            "It usually takes approx 3-10 minutes for PMHC to process xlsx files "
+            "depending on the number of months included in the data, less for zipped "
+            "csv files (e.g. round 2 onward)"
         )
 
         with sync_playwright() as p:
@@ -272,6 +484,21 @@ class PmhcWebApp:
 
             return self.upload_filename
 
+    def start_timer(self):
+        """Start a timer. Useful in recording how long a PMHC upload takes to process"""
+        self.start_timestamp = datetime.now()
+
+    def stop_timer(self) -> int:
+        """Stops a timer started with start_timer() and returns the value in minutes
+
+        Returns:
+            int: number of minutes the timer ran for
+        """
+        end_timestamp = datetime.now()
+        elapsed_time = end_timestamp - self.start_timestamp
+        elapsed_minutes = elapsed_time.total_seconds() / 60
+        return round(elapsed_minutes, 1)
+
     def wait_for_upload(self):
         """Waits for a PMHC upload to complete processing in 'test' mode"""
 
@@ -308,8 +535,6 @@ class PmhcWebApp:
         Returns:
             Path: Path to JSON file saved to local disk
         """
-
-        logging.info(f"Retrieving PMHC JSON error file for upload_id: {upload_id}")
 
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=self.headless)
@@ -356,7 +581,38 @@ class PmhcWebApp:
             time.sleep(1)
 
     def get_user_info(self, name: str) -> str:
-        """Get info about the logged in PMHC user"""
+        """Gets info about the logged in PMHC user
+        eg:
+        email:    jonathan.stucken@swsphn.com.au
+        id:       3826
+        username, roles, user_agent, uuid etc
+
+        Args:
+            name (str): specific field of the user info you want e.g. username
+
+        Raises:
+            InvalidPmhcUser: if error retrieving from PMHC
+
+        Returns:
+            str: the value of the user info field requested e.g. 'johnsmith1'
+        """
+        # only do this if this class hasn't already requested user info through use of
+        # the login() method
+        if not self.user_info:
+            # get info about the logged in user from PMHC
+            with sync_playwright() as p:
+                browser = p.chromium.launch(headless=self.headless)
+                context = browser.new_context(storage_state=self.STATE)
+                context.set_default_timeout(self.default_timeout)
+                page = context.new_page()
+                user_query = page.request.get("https://pmhc-mds.net/api/current-user")
+                self.user_info = user_query.json()
+
+            # error key will be present if login was unsuccessful
+            if "error" in self.user_info:
+                logging.error("Could not retrieve user details from PMHC")
+                raise InvalidPmhcUser
+
         return self.user_info[name]
 
     def get_pmhc_username(self) -> str:
