@@ -91,16 +91,18 @@ class PmhcWebApp:
         # Setup sqlite database
         self.db_conn = sqlite3.connect(self.db_file)
 
-        # startime, filename, rounds, savepoints (see savepoints_for_gui_testing.txt)
         sql = """
         CREATE TABLE IF NOT EXISTS save_points
             (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 upload_id TEXT NOT NULL,
-                input_file TEXT NOT NULL,
+                original_input_file TEXT NOT NULL,
+                original_input_file_size INTEGER NOT NULL,
+                pmhc_filename TEXT NOT NULL,
                 round_count INTEGER NOT NULL,
                 start_time DATETIME,
-                processing_time INTEGER NOT NULL
+                processing_time INTEGER NOT NULL,
+                complete BOOLEAN NOT NULL DEFAULT 0
             )
         """
         self.db_conn.execute(sql)
@@ -108,33 +110,58 @@ class PmhcWebApp:
     def db_create_save_point(
         self,
         upload_id: str,
-        input_file: Path,
+        original_input_file: Path,
+        pmhc_filename: str,
         round_count: int,
         start_time: datetime,
         processing_time: int,
+        complete: bool,
     ) -> int:
         """Creates a new save point which the user can resume from in future
 
         Args:
             upload_id (str): PMHC upload_id e.g. 09cbed58
-            input_file (Path): PMHC input_file e.g. PMHC_MDS_20230101_20230512.xlsx
+            original_input_file (Path): PMHC input_file e.g. PMHC_MDS_20230101_20230512.xlsx
+            pmhc_filename (str): the dynmically generated filename which was uploaded to
+            PMHC e.g. a7ca62e9_20230526_091643_round_3.zip
             round_count (int): which round the user is currently up to e.g. 2
             start_time (datetime): start_time when script started
             e.g. 2023-05-24 11:35:55.926231
             processing_time (int): number of seconds it took PMHC to process the file
+            complete (bool): True if PMHC status is 'complete', False if 'error'
 
         Returns:
             int: the id of the new save_point
         """
-        # strip off everything but the filename from input_file, e.g. remove C:\test\
-        input_file_stripped = input_file.name
 
-        insert_sql = (
-            "INSERT INTO save_points (upload_id, input_file, round_count, start_time, "
-            "processing_time) "
-            f"VALUES ('{upload_id}', '{input_file_stripped}', '{round_count}', "
-            f"'{start_time}', '{processing_time}')"
-        )
+        # get the filesize of input_file for matching purposes
+        original_input_file_size = original_input_file.stat().st_size
+
+        # strip off everything but the filename from input_file, e.g. remove C:\test\
+        original_input_file_stripped = original_input_file.name
+
+        insert_sql = f"""
+            INSERT INTO save_points (
+                upload_id,
+                original_input_file,
+                original_input_file_size,
+                pmhc_filename,
+                round_count,
+                start_time,
+                processing_time,
+                complete
+            )
+            VALUES (
+                '{upload_id}',
+                '{original_input_file_stripped}',
+                '{original_input_file_size}',
+                '{pmhc_filename}',
+                '{round_count}',
+                '{start_time}',
+                '{processing_time}',
+                {complete}
+            )
+        """
 
         try:
             cursor = self.db_conn.execute(insert_sql)
@@ -156,11 +183,20 @@ class PmhcWebApp:
             dict: returns a dictionary with fields from save_points table
         """
 
-        select_sql = (
-            "SELECT id, upload_id, input_file, round_count, "
-            "strftime('%d/%m/%Y %H:%M', start_time) as start_time, processing_time "
-            f"FROM save_points WHERE id = '{save_point_id}' LIMIT 1"
-        )
+        select_sql = f"""
+        SELECT
+            id,
+            upload_id,
+            original_input_file,
+            original_input_file_size,
+            pmhc_filename,
+            round_count,
+            strftime('%d/%m/%Y %H:%M', start_time) as start_time,
+            processing_time,
+            complete
+        FROM save_points
+        WHERE id = '{save_point_id}' LIMIT 1
+        """
 
         cursor = self.db_conn.execute(select_sql)
         row = cursor.fetchone()
@@ -168,49 +204,49 @@ class PmhcWebApp:
         if row is None:
             return {}
         else:
-            columns = [
-                "id",
-                "upload_id",
-                "input_file",
-                "round_count",
-                "start_time",
-                "processing_time",
-            ]
+            columns = [column[0] for column in cursor.description]
             result_dict = dict(zip(columns, row))
             return result_dict
 
-    def db_get_save_points(self, input_file: Path) -> dict:
+    def db_get_save_points(self, original_input_file: Path) -> dict:
         """gets all the savepoints for a given input_file
 
         Args:
-            input_file (Path): PMHC input_file e.g. PMHC_MDS_20230101_20230512.xlsx
+            original_input_file (Path): PMHC input_file
+            e.g. PMHC_MDS_20230101_20230512.xlsx
 
         Returns:
             dict: dictionary containing rows from save_points table
         """
 
-        # strip off everything but the filename from input_file, e.g. remove C:\test\
-        input_file_stripped = input_file.name
+        # get input_file_size
+        original_input_file_size = original_input_file.stat().st_size
 
-        select_sql = (
-            "SELECT id, upload_id, input_file, round_count, "
-            "strftime('%d/%m/%Y %H:%M', start_time) as start_time, processing_time "
-            f"FROM save_points WHERE input_file = '{input_file_stripped}' "
-            "ORDER BY id ASC"
-        )
+        # strip off everything but the filename from input_file, e.g. remove C:\test\
+        original_input_file_stripped = original_input_file.name
+
+        select_sql = f"""
+        SELECT
+            id,
+            upload_id,
+            original_input_file,
+            original_input_file_size,
+            pmhc_filename,
+            round_count,
+            strftime('%d/%m/%Y %H:%M', start_time) as start_time,
+            processing_time,
+            complete
+        FROM save_points
+        WHERE original_input_file = '{original_input_file_stripped}'
+        AND original_input_file_size = '{original_input_file_size}'
+        ORDER BY id ASC
+        """
 
         cursor = self.db_conn.execute(select_sql)
         rows = cursor.fetchall()
 
         # Convert the fetched rows to a dictionary
-        columns = [
-            "id",
-            "upload_id",
-            "input_file",
-            "round_count",
-            "start_time",
-            "processing_time",
-        ]
+        columns = [column[0] for column in cursor.description]
         result_dict = [dict(zip(columns, row)) for row in rows]
 
         return result_dict
