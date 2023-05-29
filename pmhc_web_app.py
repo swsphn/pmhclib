@@ -100,7 +100,8 @@ class PmhcWebApp:
                 original_input_file_size INTEGER NOT NULL,
                 pmhc_filename TEXT NOT NULL,
                 round_count INTEGER NOT NULL,
-                start_time DATETIME,
+                upload_date DATETIME,
+                upload_link TEXT NOT NULL,
                 processing_time INTEGER NOT NULL,
                 complete BOOLEAN NOT NULL DEFAULT 0
             )
@@ -113,22 +114,18 @@ class PmhcWebApp:
         original_input_file: Path,
         pmhc_filename: str,
         round_count: int,
-        start_time: datetime,
         processing_time: int,
-        complete: bool,
     ) -> int:
         """Creates a new save point which the user can resume from in future
 
         Args:
             upload_id (str): PMHC upload_id e.g. 09cbed58
-            original_input_file (Path): PMHC input_file e.g. PMHC_MDS_20230101_20230512.xlsx
+            original_input_file (Path): PMHC input_file
+            e.g. PMHC_MDS_20230101_20230512.xlsx
             pmhc_filename (str): the dynmically generated filename which was uploaded to
             PMHC e.g. a7ca62e9_20230526_091643_round_3.zip
             round_count (int): which round the user is currently up to e.g. 2
-            start_time (datetime): start_time when script started
-            e.g. 2023-05-24 11:35:55.926231
             processing_time (int): number of seconds it took PMHC to process the file
-            complete (bool): True if PMHC status is 'complete', False if 'error'
 
         Returns:
             int: the id of the new save_point
@@ -147,7 +144,8 @@ class PmhcWebApp:
                 original_input_file_size,
                 pmhc_filename,
                 round_count,
-                start_time,
+                upload_date,
+                upload_link,
                 processing_time,
                 complete
             )
@@ -157,12 +155,12 @@ class PmhcWebApp:
                 '{original_input_file_size}',
                 '{pmhc_filename}',
                 '{round_count}',
-                '{start_time}',
+                '{self.upload_date}',
+                '{self.upload_link}',
                 '{processing_time}',
-                {complete}
+                {self.complete}
             )
         """
-
         try:
             cursor = self.db_conn.execute(insert_sql)
             self.db_conn.commit()
@@ -191,7 +189,8 @@ class PmhcWebApp:
             original_input_file_size,
             pmhc_filename,
             round_count,
-            strftime('%d/%m/%Y %H:%M', start_time) as start_time,
+            upload_date,
+            upload_link,
             processing_time,
             complete
         FROM save_points
@@ -233,7 +232,8 @@ class PmhcWebApp:
             original_input_file_size,
             pmhc_filename,
             round_count,
-            strftime('%d/%m/%Y %H:%M', start_time) as start_time,
+            upload_date,
+            upload_link,
             processing_time,
             complete
         FROM save_points
@@ -407,12 +407,18 @@ class PmhcWebApp:
             return page_content
 
     def upload_file(
-        self, user_file: Path, round_count: int, mode: str = "test"
+        self,
+        input_file: Path,
+        original_input_file: Path,
+        round_count: int,
+        mode: str = "test",
     ) -> Path:
         """Uploads a user specified file to PMHC website
 
         Args:
-            user_file (Path): path to the file e.g. 'PMHC_MDS_20230101_20230131.xlsx'
+            input_file (Path): path to the file e.g. 'cc9dd7b5.csv'
+            original_input_file (Path): path to the original file
+            e.g. 'PMHC_MDS_20230101_20230131.xlsx'
             round_count (int): What round of file this is e.g. 1, 2, 3 etc
             mode (str): Upload in 'test' or 'live' mode? Defaults to 'test'.
             Use 'live' with care!
@@ -425,17 +431,15 @@ class PmhcWebApp:
             Path: filename of the new file we generated for matching purposes
         """
 
-        user_file = Path(user_file)
-
         # check file looks ok
-        if user_file.suffix != ".xlsx" and user_file.suffix != ".zip":
+        if input_file.suffix != ".xlsx" and input_file.suffix != ".zip":
             logging.error(
                 "Only .xlsx or .zip (containing multiple csv's) are acceptable PMHC "
                 "input files"
             )
             raise IncorrectFileType
 
-        if not user_file.exists():
+        if not input_file.exists():
             logging.error(
                 "Input file does not exist - please check the file path and try again"
             )
@@ -451,23 +455,23 @@ class PmhcWebApp:
             self.wait_for_upload()
 
         # copy and rename the user file so we can find it again when it is uploaded
-        # to PMHC
-        # new filename should be in the format of:
+        # to PMHC. New filename should be in the format of:
         # YYYYMMDD_HHMMSS_round1.xlsx
-        now = datetime.now()
-        date_string = now.strftime("%Y%m%d_%H%M%S")
+        current_timestamp = round(time.time())
 
         # self.upload_filename will be used by other class methods
         # e.g. to retrieve upload_id
         self.upload_filename = (
-            f"{user_file.stem}_{date_string}_round_{round_count}{user_file.suffix}"
+            f"round_{round_count}_{original_input_file.stem}_{current_timestamp}"
+            f"{input_file.suffix}"
         )
+
         logging.info(
             f"New dynamically generated round {round_count} filename is: "
             f"'{self.upload_filename}'"
         )
         upload_filepath = f"{self.uploads_folder}/{self.upload_filename}"
-        shutil.copyfile(user_file, upload_filepath)
+        shutil.copyfile(input_file, upload_filepath)
 
         logging.info(
             f"Uploading '{self.upload_filename}' to PMHC as a '{mode}' file\n"
@@ -488,32 +492,28 @@ class PmhcWebApp:
             if mode == "live":
                 logging.info("Uploading in 'live' mode")
             else:
-                logging.info("Uploading in 'test' mode, clicking checkbox")
+                logging.info("Uploading in 'test' mode")
                 page.locator('[id="testUploadCheckbox"]').click()
 
-            logging.info("Selecting Organisation: SWSPHN")
             # page.locator('"South Western Sydney ( PHN105 )"').click()
             page.select_option("#uploadOrgSelect", value="PHN105")
 
             # PMHC have hidden form fields which holds the filename etc
             # reveal these to make our life easier when debugging
             # <input type="file" id="fileUpload" style="display: none;">
-            logging.info("Revealing the hidden form fields")
             page.eval_on_selector("#fileUpload", 'el => el.style.display = "block"')
             page.eval_on_selector("#uploadBtn", 'el => el.style.display = "block"')
 
-            logging.info("Entering filename into dialog box")
             # Get the input element for the file selector
             file_input = page.query_selector("#fileUpload")
             file_input.set_input_files(upload_filepath)
 
-            logging.info("Clicking 'Upload' button")
             page.locator('[id="uploadBtn"]').click()
             delay = 60
             logging.info(
                 f"Uploading '{self.upload_filename}' to PMHC, waiting {delay} seconds..."
             )
-            self.showLoadingBar(delay, description="Waiting for PMHC upload...")
+            self.show_loading_bar(delay, description="Waiting for PMHC upload...")
 
             page.wait_for_load_state()
             browser.close()
@@ -556,7 +556,7 @@ class PmhcWebApp:
                 )
                 break
 
-            self.showLoadingBar(
+            self.show_loading_bar(
                 delay, description=f"{counter} - Waiting for PMHC processing..."
             )
             counter += 1
@@ -603,7 +603,7 @@ class PmhcWebApp:
             # we start getting multiple files coming back
             return Path(filename)
 
-    def showLoadingBar(self, delay: int, description: str):
+    def show_loading_bar(self, delay: int, description: str):
         """Shows a loading bar for a given amount of seconds
         This is useful for delaying a script e.g. whilst a PMHC
         upload processes
@@ -736,26 +736,20 @@ class PmhcWebApp:
             # Open the PMHC 'View Uploads' page
             page.goto("https://pmhc-mds.net/#/upload/list")
             page.wait_for_load_state()
-            logging.info("Clicking 'Filters' button")
             page.locator('"Filters"').click()
             time.sleep(1)
 
-            logging.info(f"Setting 'File Name': {pmhc_filename}")
             page.type('input[id="filename"]', pmhc_filename)
 
             pmhc_username = self.get_pmhc_username()
-            logging.info(f"Setting 'Username': {pmhc_username}")
             page.type('input[id="user.username"]', pmhc_username)
 
-            logging.info("Setting 'Test': Yes")
             page.select_option("#test", value="1")
 
-            logging.info("Clicking 'Apply' button")
             page.locator('"Apply"').click()
             time.sleep(1)
             page.wait_for_load_state()
 
-            logging.info("Scraping 'Upload ID'")
             parent_div_obj = page.query_selector(".ag-center-cols-container")
             parent_div = parent_div_obj.inner_html()
 
@@ -765,6 +759,21 @@ class PmhcWebApp:
             soup = BeautifulSoup(parent_div, "html.parser")
             spans = soup.find_all("span", {"class": "ag-cell-value"})
             upload_id = spans[0].text
+
+            # save other helpful data from PMHC
+            self.upload_date = spans[1].text
+
+            # extract upload link
+            upload_link = soup.find("a", class_="upload-filename-link")["href"]
+            self.upload_link = f"https://pmhc-mds.net/{upload_link}"
+
+            # save status of this upload
+            complete_text = spans[7].text
+
+            if complete_text == "complete":
+                self.complete = True
+            else:
+                self.complete = False
 
             # A valid PMHC upload_id should be 8 characters long
             # this should catch any general errors with the bs4 scrapes to this point
@@ -782,7 +791,7 @@ class PmhcWebApp:
 
         return self.upload_id
 
-    def get_last_upload_status(self) -> str:
+    def get_upload_status(self) -> str:
         """Gets the status of the last PMHC upload
         self.find_upload_id() must be called prior to calling this method
         status is typically 'error', 'processing', or 'complete'
@@ -798,3 +807,23 @@ class PmhcWebApp:
                 "self.find_upload_id() has been called first before calling this method"
             )
             raise InvalidPmhcUploadId
+
+    def get_upload_date(self):
+        """Returns the most recent upload_date
+        self.find_upload_id() must be called prior to calling this method
+
+        Returns:
+            str: upload_date in format of '29/05/2023 02:40:56 PM'
+        """
+        # returns the most recent upload_date
+        return self.upload_date
+
+    def get_upload_link(self):
+        """Returns the most recent upload_link
+        self.find_upload_id() must be called prior to calling this method
+
+        Returns:
+            str: upload_link in format of:
+            https://pmhc-mds.net/#/upload/details/d1dda324-cd98-4910-b44e-4b5e99898ea9/PHN105
+        """
+        return self.upload_link
