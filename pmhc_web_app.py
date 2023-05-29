@@ -473,10 +473,7 @@ class PmhcWebApp:
             page.wait_for_load_state()
 
             # upload in 'live' (e.g. completed file) or 'test' mode (error file)?
-            if mode == "live":
-                logging.info("Uploading in 'live' mode")
-            else:
-                logging.info("Uploading in 'test' mode")
+            if mode == "test":
                 page.locator('[id="testUploadCheckbox"]').click()
 
             # page.locator('"South Western Sydney ( PHN105 )"').click()
@@ -495,7 +492,8 @@ class PmhcWebApp:
             page.locator('[id="uploadBtn"]').click()
             delay = 60
             logging.info(
-                f"Uploading '{self.upload_filename}' to PMHC, waiting {delay} seconds..."
+                f"Uploading '{self.upload_filename}' to PMHC in '{mode}' mode, "
+                f"waiting {delay} seconds..."
             )
             self.show_loading_bar(delay, description="Waiting for PMHC upload...")
 
