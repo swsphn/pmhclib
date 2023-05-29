@@ -56,6 +56,8 @@ class PmhcWebApp:
     upload_filename = None
     upload_id = None
     upload_status = None
+    upload_link = None
+    upload_date = None
     STATE = Path("./DO_NOT_COMMIT/state.json")  # save browser session state
     downloads_folder = Path("downloads")  # default value, can be overridden
     uploads_folder = Path("uploads")  # default value, can be overridden
@@ -99,6 +101,7 @@ class PmhcWebApp:
                 original_input_file TEXT NOT NULL,
                 original_input_file_size INTEGER NOT NULL,
                 pmhc_filename TEXT NOT NULL,
+                errors_removed_file TEXT,
                 round_count INTEGER NOT NULL,
                 upload_date DATETIME,
                 upload_link TEXT NOT NULL,
@@ -113,6 +116,7 @@ class PmhcWebApp:
         upload_id: str,
         original_input_file: Path,
         pmhc_filename: str,
+        errors_removed_file: Path,
         round_count: int,
         processing_time: int,
     ) -> int:
@@ -124,6 +128,8 @@ class PmhcWebApp:
             e.g. PMHC_MDS_20230101_20230512.xlsx
             pmhc_filename (str): the dynmically generated filename which was uploaded to
             PMHC e.g. a7ca62e9_20230526_091643_round_3.zip
+            errors_removed_file (Path): File with errors removed uploaded to PMHC
+            e.g. errors_removed\9d9b43d9.zip
             round_count (int): which round the user is currently up to e.g. 2
             processing_time (int): number of seconds it took PMHC to process the file
 
@@ -143,6 +149,7 @@ class PmhcWebApp:
                 original_input_file,
                 original_input_file_size,
                 pmhc_filename,
+                errors_removed_file,
                 round_count,
                 upload_date,
                 upload_link,
@@ -154,6 +161,7 @@ class PmhcWebApp:
                 '{original_input_file_stripped}',
                 '{original_input_file_size}',
                 '{pmhc_filename}',
+                '{errors_removed_file}',
                 '{round_count}',
                 '{self.upload_date}',
                 '{self.upload_link}',
@@ -182,18 +190,7 @@ class PmhcWebApp:
         """
 
         select_sql = f"""
-        SELECT
-            id,
-            upload_id,
-            original_input_file,
-            original_input_file_size,
-            pmhc_filename,
-            round_count,
-            upload_date,
-            upload_link,
-            processing_time,
-            complete
-        FROM save_points
+        SELECT * FROM save_points
         WHERE id = '{save_point_id}' LIMIT 1
         """
 
@@ -225,18 +222,7 @@ class PmhcWebApp:
         original_input_file_stripped = original_input_file.name
 
         select_sql = f"""
-        SELECT
-            id,
-            upload_id,
-            original_input_file,
-            original_input_file_size,
-            pmhc_filename,
-            round_count,
-            upload_date,
-            upload_link,
-            processing_time,
-            complete
-        FROM save_points
+        SELECT * FROM save_points
         WHERE original_input_file = '{original_input_file_stripped}'
         AND original_input_file_size = '{original_input_file_size}'
         ORDER BY id ASC
@@ -338,10 +324,8 @@ class PmhcWebApp:
             # login to PMHC website
             page.goto("https://pmhc-mds.net")
             self.random_delay()
-            logging.info("Clicking 'Sign in' button")
             page.locator('[id="loginBtn"]').click()
             self.random_delay()
-            logging.info("Filling in user credentials")
             page.type('input[id="username"]', username)
             page.type('input[id="password"]', password)
 
@@ -726,8 +710,6 @@ class PmhcWebApp:
         """
 
         # open PMHC 'View Uploads' page
-        logging.info("Opening PMHC 'View Uploads page'")
-
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=self.headless)
             context = browser.new_context(storage_state=self.STATE)
