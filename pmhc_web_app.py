@@ -258,13 +258,10 @@ class PmhcWebApp:
         old_num_pmhc_errors = old_result_dict["num_pmhc_errors"]
 
         if old_row is None:
-            print("old row is None")
             return False
         elif old_num_pmhc_errors == current_num_pmhc_errors:
-            print("num errors match prior result")
             return True
         else:
-            print("something else")
             return False
 
     def db_get_save_points(self, original_input_file: Path) -> dict:
