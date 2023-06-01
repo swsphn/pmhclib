@@ -103,6 +103,7 @@ class PmhcWebApp:
                 pmhc_filename TEXT NOT NULL,
                 errors_removed_file TEXT,
                 round_count INTEGER NOT NULL,
+                num_pmhc_errors INTEGER NOT NULL,
                 upload_date DATETIME,
                 upload_link TEXT NOT NULL,
                 processing_time INTEGER NOT NULL,
@@ -118,6 +119,7 @@ class PmhcWebApp:
         pmhc_filename: str,
         errors_removed_file: Path,
         round_count: int,
+        num_pmhc_errors: int,
         processing_time: int,
     ) -> int:
         """Creates a new save point which the user can resume from in future
@@ -131,6 +133,7 @@ class PmhcWebApp:
             errors_removed_file (Path): File with errors removed uploaded to PMHC
             e.g. errors_removed\9d9b43d9.zip
             round_count (int): which round the user is currently up to e.g. 2
+            num_pmhc_errors (int): number of errors returned by PMHC
             processing_time (int): number of seconds it took PMHC to process the file
 
         Returns:
@@ -151,6 +154,7 @@ class PmhcWebApp:
                 pmhc_filename,
                 errors_removed_file,
                 round_count,
+                num_pmhc_errors,
                 upload_date,
                 upload_link,
                 processing_time,
@@ -163,6 +167,7 @@ class PmhcWebApp:
                 '{pmhc_filename}',
                 '{errors_removed_file}',
                 '{round_count}',
+                '{num_pmhc_errors}',
                 '{self.upload_date}',
                 '{self.upload_link}',
                 '{processing_time}',
@@ -203,6 +208,64 @@ class PmhcWebApp:
             columns = [column[0] for column in cursor.description]
             result_dict = dict(zip(columns, row))
             return result_dict
+
+    def db_does_error_count_match_last_round(
+        self, original_input_file: Path, id: int
+    ) -> bool:
+        """Checks if same number of errors in current round compared to prior round.
+        Useful in warning the user if they are entering an endless loop where they get
+        the same errors each round due to the script not being able to remove them.
+
+        Args:
+            original_input_file (Path): e.g. PMHC_MDS_20200708_20200731.xlsx
+            id (int): save_point_id of current round e.g. 8
+
+        Returns:
+            bool: True if error counts match
+        """
+
+        # get input_file_size
+        original_input_file_size = original_input_file.stat().st_size
+
+        # strip off everything but the filename from input_file, e.g. remove C:\test\
+        original_input_file_stripped = original_input_file.name
+
+        # get current save_point
+        current_sql = f"""
+        SELECT id, num_pmhc_errors FROM save_points
+        WHERE id = '{id}'
+        LIMIT 1
+        """
+        current_cursor = self.db_conn.execute(current_sql)
+        current_row = current_cursor.fetchone()
+        current_columns = [column[0] for column in current_cursor.description]
+        current_result_dict = dict(zip(current_columns, current_row))
+        current_num_pmhc_errors = current_result_dict["num_pmhc_errors"]
+
+        # get prior save_point matching same file/filesize
+        old_sql = f"""
+        SELECT id, num_pmhc_errors FROM save_points
+        WHERE original_input_file = '{original_input_file_stripped}'
+        AND original_input_file_size = '{original_input_file_size}'
+        AND id < '{id}'
+        ORDER BY id DESC
+        LIMIT 1
+        """
+        old_cursor = self.db_conn.execute(old_sql)
+        old_row = old_cursor.fetchone()
+        old_columns = [column[0] for column in old_cursor.description]
+        old_result_dict = dict(zip(old_columns, old_row))
+        old_num_pmhc_errors = old_result_dict["num_pmhc_errors"]
+
+        if old_row is None:
+            print("old row is None")
+            return False
+        elif old_num_pmhc_errors == current_num_pmhc_errors:
+            print("num errors match prior result")
+            return True
+        else:
+            print("something else")
+            return False
 
     def db_get_save_points(self, original_input_file: Path) -> dict:
         """gets all the savepoints for a given input_file
