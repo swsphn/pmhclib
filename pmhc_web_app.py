@@ -391,21 +391,13 @@ class PmhcWebApp:
 
             # target the 'Continue' submit button. Note from 25/05/2023 there are now
             # two of them: the first hidden one (a decoy!), the second visible
-            # one (real). We need to isolate the correct one based on its parent div
-            buttons = page.locator(
-                "button[type='submit'][name='action'][value='default']"
-                "[data-action-button-primary='true']"
-            ).all()
+            # one (real). We need to isolate the correct one based on its attributes
+            buttons = page.locator("button:text('Continue')").all()
 
-            # find the real 'Continue' button which isn't hidden, determined by the
-            # parent div class="c79fd81e4"
             if buttons:
                 for button in buttons:
-                    # click the correct button
-                    parent_div_class = button.evaluate(
-                        '(element) => element.parentNode.getAttribute("class")'
-                    )
-                    if parent_div_class == "c79fd81e4":
+                    # the real button contains 'data-action-button-primary' attribute
+                    if button.get_attribute("data-action-button-primary"):
                         button.click()
             else:
                 logging.error("Could not find 'Continue' button on login page")
@@ -533,23 +525,33 @@ class PmhcWebApp:
             page.wait_for_load_state()
 
             # upload in 'live' (e.g. completed file) or 'test' mode (error file)?
+            logging.debug("Clicking 'Upload as test data' checkbox")
             if mode == "test":
                 page.locator('[id="testUploadCheckbox"]').click()
 
-            # page.locator('"South Western Sydney ( PHN105 )"').click()
-            page.select_option("#uploadOrgSelect", value="PHN105")
+            # This select field appears to be hard set from 13/06/2023 onward, so
+            # this code has been disabled for now. We may need it again in the future.
+            # logging.info("Clicking 'South Western Sydney ( PHN105 )'")
+            # page.locator('#uploadOrgSelect').click()
+            # page.select_option("#uploadOrgSelect", value="PHN105")
 
-            # PMHC have hidden form fields which holds the filename etc
+            # PMHC have hidden form fields which hold the filename etc
             # reveal these to make our life easier when debugging
-            # <input type="file" id="fileUpload" style="display: none;">
-            page.eval_on_selector("#fileUpload", 'el => el.style.display = "block"')
-            page.eval_on_selector("#uploadBtn", 'el => el.style.display = "block"')
+            logging.debug("Unhiding #fileUpload field")
+            page.eval_on_selector(
+                "#fileUpload", "element => element.style.display = 'block'"
+            )
 
-            # Get the input element for the file selector
-            file_input = page.query_selector("#fileUpload")
+            logging.debug("Adding upload file details")
+            file_input = page.locator("#fileUpload")
             file_input.set_input_files(upload_filepath)
 
-            page.locator('[id="uploadBtn"]').click()
+            logging.debug("Unhiding #uploadBtn")
+            upload_button = page.locator("#uploadBtn")
+            page.eval_on_selector("#uploadBtn", 'el => el.style.display = "block"')
+
+            logging.debug("Clicking #uploadBtn")
+            upload_button.click()
             delay = 60
             logging.info(
                 f"Uploading '{self.upload_filename}' to PMHC in '{mode}' mode, "
