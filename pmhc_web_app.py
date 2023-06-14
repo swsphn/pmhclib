@@ -51,43 +51,47 @@ class MissingPmhcElement(Exception):
 
 class PmhcWebApp:
     # class properties
-    headless = True  # default value, can be overridden
     user_info = None
     upload_filename = None
     upload_id = None
     upload_status = None
     upload_link = None
     upload_date = None
-    STATE = Path("./DO_NOT_COMMIT/state.json")  # save browser session state
-    downloads_folder = Path("downloads")  # default value, can be overridden
-    uploads_folder = Path("uploads")  # default value, can be overridden
-    start_time = None
     default_timeout = 60000
     db_conn = None  # sqlite database connection object
     db_file = "pmhc_web_app.db"
 
+    def __enter__(self):
+        # Initialise playwright without a context manager
+        self.p = sync_playwright().start()
+        self.browser = self.p.chromium.launch(headless=self.headless)
+        self.context = self.browser.new_context()
+        self.context.set_default_timeout(self.default_timeout)
+        self.page = self.context.new_page()
+        return self  # Return the instance of this class
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        # exc_type, exc_value, and traceback are required parameters in __exit__()
+        self.browser.close()
+        self.p.stop()
+
     def __init__(
         self,
-        downloads_folder: Path,
-        uploads_folder: Path,
         start_time: datetime,
-        headless: bool,
+        headless: True,
     ):
         # save whether to use a headless browser instance or not
         self.headless = headless
         self.start_time = start_time
 
-        # create required folders on disk
-        state_folder = self.STATE.parent
-        state_folder.mkdir(parents=True, exist_ok=True)
+        self.downloads_folder = Path("downloads")
         self.downloads_folder.mkdir(parents=True, exist_ok=True)
+
+        self.uploads_folder = Path("uploads")
         self.uploads_folder.mkdir(parents=True, exist_ok=True)
 
         # setup sqlite database for saving/resuming PMHC uploads
         self.db_setup()
-
-        # login to PMHC and save browser session state for later use
-        # self.login()
 
     def db_setup(self):
         # Setup sqlite database
@@ -146,6 +150,8 @@ class PmhcWebApp:
         # strip off everything but the filename from input_file, e.g. remove C:\test\
         original_input_file_stripped = original_input_file.name
 
+        # sanitise the query as some of these variables have been populated from PMHC
+        # data which we have no control over
         insert_sql = f"""
             INSERT INTO save_points (
                 upload_id,
@@ -316,35 +322,24 @@ class PmhcWebApp:
         Returns:
             bool: True if logged in
         """
-        # First check if state file exists. It won't exist if this is the first time
-        # user has run script, as it only gets created when self.login() is called
-        if not os.path.exists(self.STATE):
-            return False
+        # check against PMHC website if login session is still valid
+        self.page.goto("https://pmhc-mds.net")
+        self.page.wait_for_load_state()
+        self.random_delay()
 
-        # check against PMHC website if session saved in self.STATE is still valid
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=self.headless)
-            context = browser.new_context(storage_state=self.STATE)
-            context.set_default_timeout(self.default_timeout)
-            page = context.new_page()
-            page.goto("https://pmhc-mds.net")
-            page.wait_for_load_state()
-            self.random_delay()
+        # Detect this element which should only exist for logged in users:
+        # <span id="currentUserText" class="ng-binding">
+        element_exists = self.page.locator("#currentUserText").is_visible()
+        if element_exists:
+            logged_in = True
+        else:
+            logged_in = False
 
-            # Detect this element which should only exist for logged in users:
-            # <span id="currentUserText" class="ng-binding">
-            element_exists = page.locator("#currentUserText").is_visible()
-            if element_exists:
-                logged_in = True
-            else:
-                logged_in = False
-
-            browser.close()
-            return logged_in
+        return logged_in
 
     def login(self):
-        """Logs in to PMHC website and saves the Playwright state
-        This allows us to resume the session across class methods
+        """Logs in to PMHC website. This allows us to reuse the login the session
+        across other class methods
         """
 
         # Prompt user for credentials if not set in env.
@@ -374,73 +369,41 @@ class PmhcWebApp:
             password = getpass("Enter PMHC password (keyboard input will be hidden): ")
 
         logging.info("Logging into PMHC website")
+        self.page.goto("https://pmhc-mds.net")
+        self.random_delay()
+        self.page.locator('[id="loginBtn"]').click()
+        self.random_delay()
+        self.page.type('input[id="username"]', username)
+        self.page.type('input[id="password"]', password)
 
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=self.headless)
-            context = browser.new_context()
-            context.set_default_timeout(self.default_timeout)
-            page = context.new_page()
+        # target the 'Continue' submit button. Note from 25/05/2023 there are now
+        # two of them: the first hidden one (a decoy!), the second visible
+        # one (real). We need to isolate the correct one based on its attributes
+        buttons = self.page.locator("button:text('Continue')").all()
 
-            # login to PMHC website
-            page.goto("https://pmhc-mds.net")
-            self.random_delay()
-            page.locator('[id="loginBtn"]').click()
-            self.random_delay()
-            page.type('input[id="username"]', username)
-            page.type('input[id="password"]', password)
+        if buttons:
+            for button in buttons:
+                # the real button contains 'data-action-button-primary' attribute
+                if button.get_attribute("data-action-button-primary"):
+                    button.click()
+        else:
+            logging.error("Could not find 'Continue' button on login page")
+            raise MissingPmhcElement
 
-            # target the 'Continue' submit button. Note from 25/05/2023 there are now
-            # two of them: the first hidden one (a decoy!), the second visible
-            # one (real). We need to isolate the correct one based on its attributes
-            buttons = page.locator("button:text('Continue')").all()
+        self.page.wait_for_load_state()
+        self.random_delay()
 
-            if buttons:
-                for button in buttons:
-                    # the real button contains 'data-action-button-primary' attribute
-                    if button.get_attribute("data-action-button-primary"):
-                        button.click()
-            else:
-                logging.error("Could not find 'Continue' button on login page")
-                raise MissingPmhcElement
+        # confirm login was successful
+        user_query = self.page.request.get("https://pmhc-mds.net/api/current-user")
+        self.user_info = user_query.json()
 
-            page.wait_for_load_state()
-            self.random_delay()
-
-            # confirm login was successful
-            user_query = page.request.get("https://pmhc-mds.net/api/current-user")
-            self.user_info = user_query.json()
-
-            # error key will be present if login was unsuccessful
-            if "error" in self.user_info:
-                logging.error(
-                    "PMHC login was unsuccessful. Are you sure you entered "
-                    "correct credentials?"
-                )
-                raise InvalidPmhcUser
-
-            # Save storage state into file
-            context.storage_state(path=self.STATE)
-            browser.close()
-
-    def get_page_content(self, url: str) -> str:
-        """Gets the page HTML for a given URL
-
-        Args:
-            url (str): e.g. https://pmhc-mds.net
-
-        Returns:
-            str: HTML content of the page
-        """
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=self.headless)
-            context = browser.new_context(storage_state=self.STATE)
-            context.set_default_timeout(self.default_timeout)
-            page = context.new_page()
-            page.goto(url)
-            page.wait_for_load_state()
-            page_content = page.content()
-
-            return page_content
+        # error key will be present if login was unsuccessful
+        if "error" in self.user_info:
+            logging.error(
+                "PMHC login was unsuccessful. Are you sure you entered "
+                "correct credentials?"
+            )
+            raise InvalidPmhcUser
 
     def upload_file(
         self,
@@ -516,53 +479,46 @@ class PmhcWebApp:
             "csv files (e.g. round 2 onward)"
         )
 
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=self.headless)
-            context = browser.new_context(storage_state=self.STATE)
-            context.set_default_timeout(self.default_timeout)
-            page = context.new_page()
-            page.goto("https://pmhc-mds.net/#/upload/add")
-            page.wait_for_load_state()
+        self.page.goto("https://pmhc-mds.net/#/upload/add")
+        self.page.wait_for_load_state()
 
-            # upload in 'live' (e.g. completed file) or 'test' mode (error file)?
-            logging.debug("Clicking 'Upload as test data' checkbox")
-            if mode == "test":
-                page.locator('[id="testUploadCheckbox"]').click()
+        # upload in 'live' (e.g. completed file) or 'test' mode (error file)?
+        logging.debug("Clicking 'Upload as test data' checkbox")
+        if mode == "test":
+            self.page.locator('[id="testUploadCheckbox"]').click()
 
-            # This select field appears to be hard set from 13/06/2023 onward, so
-            # this code has been disabled for now. We may need it again in the future.
-            # logging.info("Clicking 'South Western Sydney ( PHN105 )'")
-            # page.locator('#uploadOrgSelect').click()
-            # page.select_option("#uploadOrgSelect", value="PHN105")
+        # This select field appears to be hard set from 13/06/2023 onward, so
+        # this code has been disabled for now. We may need it again in the future.
+        # logging.info("Clicking 'South Western Sydney ( PHN105 )'")
+        # self.page.locator('#uploadOrgSelect').click()
+        # self.page.select_option("#uploadOrgSelect", value="PHN105")
 
-            # PMHC have hidden form fields which hold the filename etc
-            # reveal these to make our life easier when debugging
-            logging.debug("Unhiding #fileUpload field")
-            page.eval_on_selector(
-                "#fileUpload", "element => element.style.display = 'block'"
-            )
+        # PMHC have hidden form fields which hold the filename etc
+        # reveal these to make our life easier when debugging
+        logging.debug("Unhiding #fileUpload field")
+        self.page.eval_on_selector(
+            "#fileUpload", "element => element.style.display = 'block'"
+        )
 
-            logging.debug("Adding upload file details")
-            file_input = page.locator("#fileUpload")
-            file_input.set_input_files(upload_filepath)
+        logging.debug("Adding upload file details")
+        file_input = self.page.locator("#fileUpload")
+        file_input.set_input_files(upload_filepath)
 
-            logging.debug("Unhiding #uploadBtn")
-            upload_button = page.locator("#uploadBtn")
-            page.eval_on_selector("#uploadBtn", 'el => el.style.display = "block"')
+        logging.debug("Unhiding #uploadBtn")
+        upload_button = self.page.locator("#uploadBtn")
+        self.page.eval_on_selector("#uploadBtn", 'el => el.style.display = "block"')
 
-            logging.debug("Clicking #uploadBtn")
-            upload_button.click()
-            delay = 60
-            logging.info(
-                f"Uploading '{self.upload_filename}' to PMHC in '{mode}' mode, "
-                f"waiting {delay} seconds..."
-            )
-            self.show_loading_bar(delay, description="Waiting for PMHC upload...")
+        logging.debug("Clicking #uploadBtn")
+        upload_button.click()
+        delay = 60
+        logging.info(
+            f"Uploading '{self.upload_filename}' to PMHC in '{mode}' mode, "
+            f"waiting {delay} seconds..."
+        )
+        self.show_loading_bar(delay, description="Waiting for PMHC upload...")
+        self.page.wait_for_load_state()
 
-            page.wait_for_load_state()
-            browser.close()
-
-            return self.upload_filename
+        return self.upload_filename
 
     def start_timer(self):
         """Start a timer. Useful in recording how long a PMHC upload takes to process"""
@@ -616,36 +572,30 @@ class PmhcWebApp:
             Path: Path to JSON file saved to local disk
         """
 
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=self.headless)
-            context = browser.new_context(storage_state=self.STATE)
-            context.set_default_timeout(self.default_timeout)
-            page = context.new_page()
+        # first we need to get the uuid e.g. 94edf5e3-36b1-46d3-9178-bf3b142da6a1
+        id_query = self.page.request.get(
+            f"https://pmhc-mds.net/api/uploads?upload_uuid={upload_id}",
+            headers={"Range": "0-49"},
+        )
 
-            # first we need to get the uuid e.g. 94edf5e3-36b1-46d3-9178-bf3b142da6a1
-            id_query = page.request.get(
-                f"https://pmhc-mds.net/api/uploads?upload_uuid={upload_id}",
-                headers={"Range": "0-49"},
-            )
+        id_json = id_query.json()
 
-            id_json = id_query.json()
+        time.sleep(0.5)
+        for upload in id_json:
+            uuid = upload["uuid"]
+            url = f"https://pmhc-mds.net/api/organisations/PHN105/uploads/{uuid}"
+            upload_errors_json = self.page.request.get(url)
 
-            time.sleep(0.5)
-            for upload in id_json:
-                uuid = upload["uuid"]
-                url = f"https://pmhc-mds.net/api/organisations/PHN105/uploads/{uuid}"
-                upload_errors_json = page.request.get(url)
+            filename = f"{self.downloads_folder}/{upload_id}.json"
+            with open(filename, "wb") as file:
+                file.write(upload_errors_json.body())
 
-                filename = f"{self.downloads_folder}/{upload_id}.json"
-                with open(filename, "wb") as file:
-                    file.write(upload_errors_json.body())
+            logging.info(f"Saved JSON file to disk: '{filename}'")
 
-                logging.info(f"Saved JSON file to disk: '{filename}'")
-
-            # return whatever json file it last found to calling script
-            # We'll need to make this more robust in the near future if
-            # we start getting multiple files coming back
-            return Path(filename)
+        # return whatever json file it last found to calling script
+        # We'll need to make this more robust in the near future if
+        # we start getting multiple files coming back
+        return Path(filename)
 
     def show_loading_bar(self, delay: int, description: str):
         """Shows a loading bar for a given amount of seconds
@@ -680,13 +630,9 @@ class PmhcWebApp:
         # the login() method
         if not self.user_info:
             # get info about the logged in user from PMHC
-            with sync_playwright() as p:
-                browser = p.chromium.launch(headless=self.headless)
-                context = browser.new_context(storage_state=self.STATE)
-                context.set_default_timeout(self.default_timeout)
-                page = context.new_page()
-                user_query = page.request.get("https://pmhc-mds.net/api/current-user")
-                self.user_info = user_query.json()
+
+            user_query = self.page.request.get("https://pmhc-mds.net/api/current-user")
+            self.user_info = user_query.json()
 
             # error key will be present if login was unsuccessful
             if "error" in self.user_info:
@@ -715,16 +661,11 @@ class PmhcWebApp:
         Returns:
             str: A string containing the JSON reponse from the request
         """
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=self.headless)
-            context = browser.new_context(storage_state=self.STATE)
-            context.set_default_timeout(self.default_timeout)
-            page = context.new_page()
-            page.goto(url)
-            page.wait_for_load_state()
-            user_query = page.request.get(url)
+        self.page.goto(url)
+        self.page.wait_for_load_state()
+        user_query = self.page.request.get(url)
 
-            return user_query.json()
+        return user_query.json()
 
     def is_upload_processing(self) -> bool:
         """Checks if the user has an upload currently 'processing' in either live or
@@ -769,67 +710,64 @@ class PmhcWebApp:
             str: PMHC upload_id e.g. 94edf5e3
         """
 
-        # open PMHC 'View Uploads' page
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=self.headless)
-            context = browser.new_context(storage_state=self.STATE)
-            page = context.new_page()
+        # Open the PMHC 'View Uploads' page
+        self.page.goto("https://pmhc-mds.net/#/upload/list")
+        self.page.wait_for_load_state()
+        self.page.locator('"Filters"').click()
+        time.sleep(1)
 
-            # Open the PMHC 'View Uploads' page
-            page.goto("https://pmhc-mds.net/#/upload/list")
-            page.wait_for_load_state()
-            page.locator('"Filters"').click()
-            time.sleep(1)
+        self.page.type('input[id="filename"]', pmhc_filename)
 
-            page.type('input[id="filename"]', pmhc_filename)
+        pmhc_username = self.get_pmhc_username()
+        self.page.type('input[id="user.username"]', pmhc_username)
 
-            pmhc_username = self.get_pmhc_username()
-            page.type('input[id="user.username"]', pmhc_username)
+        self.page.select_option("#test", value="1")
 
-            page.select_option("#test", value="1")
+        self.page.locator('"Apply"').click()
+        time.sleep(1)
+        self.page.wait_for_load_state()
 
-            page.locator('"Apply"').click()
-            time.sleep(1)
-            page.wait_for_load_state()
+        parent_div_obj = self.page.query_selector(".ag-center-cols-container")
+        parent_div = parent_div_obj.inner_html()
 
-            parent_div_obj = page.query_selector(".ag-center-cols-container")
-            parent_div = parent_div_obj.inner_html()
+        # Use bs4 to isolate the columns we want
+        # 'Upload ID' should be the first child <span> column
+        # 'Status should' be the last child <span> column
+        soup = BeautifulSoup(parent_div, "html.parser")
+        spans = soup.find_all("span", {"class": "ag-cell-value"})
+        upload_id = spans[0].text
 
-            # Use bs4 to isolate the columns we want
-            # 'Upload ID' should be the first child <span> column
-            # 'Status should' be the last child <span> column
-            soup = BeautifulSoup(parent_div, "html.parser")
-            spans = soup.find_all("span", {"class": "ag-cell-value"})
-            upload_id = spans[0].text
+        # save other helpful data from PMHC
+        # occasionally some of these variables from PMHC contain newline characters
+        self.upload_date = spans[1].text
+        self.upload_date = self.upload_date.strip("\n")
 
-            # save other helpful data from PMHC
-            self.upload_date = spans[1].text
+        # extract upload link
+        upload_link = soup.find("a", class_="upload-filename-link")["href"]
+        self.upload_link = f"https://pmhc-mds.net/{upload_link}"
+        self.upload_link = self.upload_link.strip("\n")
 
-            # extract upload link
-            upload_link = soup.find("a", class_="upload-filename-link")["href"]
-            self.upload_link = f"https://pmhc-mds.net/{upload_link}"
+        # save status of this upload
+        complete_text = spans[7].text
 
-            # save status of this upload
-            complete_text = spans[7].text
+        if complete_text == "complete":
+            self.complete = True
+        else:
+            self.complete = False
 
-            if complete_text == "complete":
-                self.complete = True
-            else:
-                self.complete = False
+        # A valid PMHC upload_id should be 8 characters long
+        # this should catch any general errors with the bs4 scrapes to this point
+        if len(upload_id) == 8:
+            self.upload_id = upload_id
 
-            # A valid PMHC upload_id should be 8 characters long
-            # this should catch any general errors with the bs4 scrapes to this point
-            if len(upload_id) == 8:
-                self.upload_id = upload_id
-
-                # status could be 'error', 'processing', or 'complete'
-                self.upload_status = spans[-1].text
-            else:
-                logging.error(
-                    "Could not retrieve a valid PMHC upload_id for filename: "
-                    f"'{pmhc_filename}'"
-                )
-                raise InvalidPmhcUploadId
+            # status could be 'error', 'processing', or 'complete'
+            self.upload_status = spans[-1].text
+        else:
+            logging.error(
+                "Could not retrieve a valid PMHC upload_id for filename: "
+                f"'{pmhc_filename}'"
+            )
+            raise InvalidPmhcUploadId
 
         return self.upload_id
 
