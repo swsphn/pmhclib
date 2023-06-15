@@ -4,15 +4,13 @@
 # This script is useful when doing multiple error removal runs with
 # remove_pmhc_mds_errors.py as it saves time and ensures you always get the correct
 # corresponding error file. Tested under Ubuntu WSL and PowerShell.
-# --no-headless runs best under PowerShell
+# --no-headless runs best under PowerShell (it's slower under Ubuntu WSL)
 #
 # No login details are saved anywhere
 # To speed up usage when doing repeated calls, create the following local env variables:
 # PMHC_USERNAME
 # PMHC_PASSWORD
 #
-# Good tute on persistent Playwright browsing
-# https://www.youtube.com/watch?v=JMq8ImhDih0
 import logging
 import os
 import platform
@@ -47,6 +45,10 @@ class InvalidPmhcUser(Exception):
 
 class MissingPmhcElement(Exception):
     """Custom error handler for when PMHC page returns incorrect Playwright element"""
+
+
+class CouldNotFindPmhcUpload(Exception):
+    """Custom error handler for when an upload cannot be found on PMHC"""
 
 
 class PmhcWebApp:
@@ -94,7 +96,8 @@ class PmhcWebApp:
         self.db_setup()
 
     def db_setup(self):
-        # Setup sqlite database
+        """Sets up sqlite database"""
+        #
         self.db_conn = sqlite3.connect(self.db_file)
 
         sql = """
@@ -150,8 +153,6 @@ class PmhcWebApp:
         # strip off everything but the filename from input_file, e.g. remove C:\test\
         original_input_file_stripped = original_input_file.name
 
-        # sanitise the query as some of these variables have been populated from PMHC
-        # data which we have no control over
         insert_sql = f"""
             INSERT INTO save_points (
                 upload_id,
@@ -315,27 +316,6 @@ class PmhcWebApp:
         """
         random_number = random.uniform(min, max)
         time.sleep(random_number)
-
-    def is_logged_in(self) -> bool:
-        """check if we already have an existing PMHC login session active we can use
-
-        Returns:
-            bool: True if logged in
-        """
-        # check against PMHC website if login session is still valid
-        self.page.goto("https://pmhc-mds.net")
-        self.page.wait_for_load_state()
-        self.random_delay()
-
-        # Detect this element which should only exist for logged in users:
-        # <span id="currentUserText" class="ng-binding">
-        element_exists = self.page.locator("#currentUserText").is_visible()
-        if element_exists:
-            logged_in = True
-        else:
-            logged_in = False
-
-        return logged_in
 
     def login(self):
         """Logs in to PMHC website. This allows us to reuse the login the session
@@ -544,14 +524,15 @@ class PmhcWebApp:
 
         while True:
             # check to see if the PMHC upload queue is free
+            pmhc_username = self.user_info["username"]
             if self.is_upload_processing():
                 logging.info(
-                    f"An upload is currently processing for '{self.get_pmhc_username()}' "
+                    f"An upload is currently processing for '{pmhc_username}' "
                     f"account, waiting for {delay} seconds..."
                 )
             else:
                 logging.info(
-                    f"No upload is processing for '{self.get_pmhc_username()}' account, "
+                    f"No upload is processing for '{pmhc_username}' account, "
                     "so we can stop waiting now"
                 )
                 break
@@ -610,47 +591,6 @@ class PmhcWebApp:
         for _i in track(range(delay), description=description):
             time.sleep(1)
 
-    def get_user_info(self, name: str) -> str:
-        """Gets info about the logged in PMHC user
-        eg:
-        email:    jonathan.stucken@swsphn.com.au
-        id:       3826
-        username, roles, user_agent, uuid etc
-
-        Args:
-            name (str): specific field of the user info you want e.g. username
-
-        Raises:
-            InvalidPmhcUser: if error retrieving from PMHC
-
-        Returns:
-            str: the value of the user info field requested e.g. 'johnsmith1'
-        """
-        # only do this if this class hasn't already requested user info through use of
-        # the login() method
-        if not self.user_info:
-            # get info about the logged in user from PMHC
-
-            user_query = self.page.request.get("https://pmhc-mds.net/api/current-user")
-            self.user_info = user_query.json()
-
-            # error key will be present if login was unsuccessful
-            if "error" in self.user_info:
-                logging.error("Could not retrieve user details from PMHC")
-                raise InvalidPmhcUser
-
-        return self.user_info[name]
-
-    def get_pmhc_username(self) -> str:
-        """Gets the PMHC username of the current logged in user
-        e.g. jonathans1
-        Note that this may differ to the env var PMHC_USERNAME which could be an
-        email address
-        Returns:
-            str: PMHC username
-        """
-        return self.get_user_info("username")
-
     def get_request(self, url: str) -> str:
         """gets the JSON response for a given request to PMHC website
 
@@ -676,7 +616,7 @@ class PmhcWebApp:
         """
         # Get a list of all this user's 'test' uploads ('processing', 'complete'
         # and 'error' status)
-        pmhc_username = self.get_pmhc_username()
+        pmhc_username = self.user_info["username"]
         json_list = self.get_request(
             f"https://pmhc-mds.net/api/uploads?username={pmhc_username}&sort=-date"
         )
@@ -687,14 +627,6 @@ class PmhcWebApp:
 
         # all ok if
         return False
-
-    def get_last_upload_filename(self) -> str:
-        """Gets the filename of the last file uploaded by the class
-
-        Returns:
-            str: filname e.g. 20230320_094815_round_1.xlsx
-        """
-        return self.upload_filename
 
     def find_upload_id(self, pmhc_filename: str) -> str:
         """Finds an upload_id for a given PMHC upload filename
@@ -717,18 +649,19 @@ class PmhcWebApp:
         time.sleep(1)
 
         self.page.type('input[id="filename"]', pmhc_filename)
-
-        pmhc_username = self.get_pmhc_username()
+        pmhc_username = self.user_info["username"]
         self.page.type('input[id="user.username"]', pmhc_username)
-
         self.page.select_option("#test", value="1")
-
         self.page.locator('"Apply"').click()
-        time.sleep(1)
         self.page.wait_for_load_state()
+        time.sleep(4)
 
         parent_div_obj = self.page.query_selector(".ag-center-cols-container")
         parent_div = parent_div_obj.inner_html()
+        if not parent_div:
+            raise CouldNotFindPmhcUpload(
+                f"Could not find PMHC upload for filename: {pmhc_filename}"
+            )
 
         # Use bs4 to isolate the columns we want
         # 'Upload ID' should be the first child <span> column
@@ -787,16 +720,6 @@ class PmhcWebApp:
                 "self.find_upload_id() has been called first before calling this method"
             )
             raise InvalidPmhcUploadId
-
-    def get_upload_date(self):
-        """Returns the most recent upload_date
-        self.find_upload_id() must be called prior to calling this method
-
-        Returns:
-            str: upload_date in format of '29/05/2023 02:40:56 PM'
-        """
-        # returns the most recent upload_date
-        return self.upload_date
 
     def get_upload_link(self):
         """Returns the most recent upload_link
