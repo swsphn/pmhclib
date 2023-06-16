@@ -374,8 +374,7 @@ class PmhcWebApp:
                 if button.get_attribute("data-action-button-primary"):
                     button.click()
         else:
-            logging.error("Could not find 'Continue' button on login page")
-            raise MissingPmhcElement
+            raise MissingPmhcElement("Could not find 'Continue' button on login page")
 
         self.page.wait_for_load_state()
         self.random_delay()
@@ -386,11 +385,10 @@ class PmhcWebApp:
 
         # error key will be present if login was unsuccessful
         if "error" in self.user_info:
-            logging.error(
+            raise InvalidPmhcUser(
                 "PMHC login was unsuccessful. Are you sure you entered "
                 "correct credentials?"
             )
-            raise InvalidPmhcUser
 
     def upload_file(
         self,
@@ -419,17 +417,15 @@ class PmhcWebApp:
 
         # check file looks ok
         if input_file.suffix != ".xlsx" and input_file.suffix != ".zip":
-            logging.error(
+            raise IncorrectFileType(
                 "Only .xlsx or .zip (containing multiple csv's) are acceptable PMHC "
                 "input files"
             )
-            raise IncorrectFileType
 
         if not input_file.exists():
-            logging.error(
+            raise FileNotFoundException(
                 "Input file does not exist - please check the file path and try again"
             )
-            raise FileNotFoundException
 
         # check no uploads are currently being processed
         # PMHC only allows one upload at a time per user account.
