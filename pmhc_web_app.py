@@ -356,7 +356,7 @@ class PmhcWebApp:
                 break
             password = getpass("Enter PMHC password (keyboard input will be hidden): ")
 
-        logging.info("Logging into PMHC website")
+        print("Logging into PMHC website")
         self.page.goto("https://pmhc-mds.net")
         self.random_delay()
         self.page.locator('[id="loginBtn"]').click()
@@ -449,14 +449,14 @@ class PmhcWebApp:
             f"{input_file.suffix}"
         )
 
-        logging.info(
+        print(
             f"New dynamically generated round {round_count} filename is: "
             f"'{self.upload_filename}'"
         )
         upload_filepath = f"{self.uploads_folder}/{self.upload_filename}"
         shutil.copyfile(input_file, upload_filepath)
 
-        logging.info(
+        print(
             f"Uploading '{self.upload_filename}' to PMHC as a '{mode}' file\n"
             "It usually takes approx 3-10 minutes for PMHC to process xlsx files "
             "depending on the number of months included in the data, less for zipped "
@@ -495,7 +495,7 @@ class PmhcWebApp:
         logging.debug("Clicking #uploadBtn")
         upload_button.click()
         delay = 60
-        logging.info(
+        print(
             f"Uploading '{self.upload_filename}' to PMHC in '{mode}' mode, "
             f"waiting {delay} seconds..."
         )
