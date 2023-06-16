@@ -11,6 +11,8 @@
 # PMHC_USERNAME
 # PMHC_PASSWORD
 #
+from datetime import datetime
+import pytz
 import logging
 import os
 import platform
@@ -591,7 +593,7 @@ class PmhcWebApp:
         for _i in track(range(delay), description=description):
             time.sleep(1)
 
-    def get_request(self, url: str) -> str:
+    def get_json_request(self, url: str) -> str:
         """gets the JSON response for a given request to PMHC website
 
         Args:
@@ -617,7 +619,7 @@ class PmhcWebApp:
         # Get a list of all this user's 'test' uploads ('processing', 'complete'
         # and 'error' status)
         pmhc_username = self.user_info["username"]
-        json_list = self.get_request(
+        json_list = self.get_json_request(
             f"https://pmhc-mds.net/api/uploads?username={pmhc_username}&sort=-date"
         )
         # see if any are in a 'processing' state
@@ -629,104 +631,54 @@ class PmhcWebApp:
         return False
 
     def find_upload_id(self, pmhc_filename: str) -> str:
-        """Finds an upload_id for a given PMHC upload filename
+        """Uses the PMHC backend to get upload_id from filter results
 
         Args:
-            pmhc_filename (str): The PMHC filename to search for
-            e.g. 20230320_094815_round_1.xlsx
-
-        Raises:
-            InvalidPmhcUploadId: Raises error if upload_id cannot be found
+            pmhc_filename (str): PMHC filename to search for
+            e.g. round_5_PMHC_MDS_20200708_20200731_1686871871.zip
 
         Returns:
-            str: PMHC upload_id e.g. 94edf5e3
+            str: upload id e.g. 11ef7dcf
         """
-
-        # Open the PMHC 'View Uploads' page
-        self.page.goto("https://pmhc-mds.net/#/upload/list")
-        self.page.wait_for_load_state()
-        self.page.locator('"Filters"').click()
-        time.sleep(1)
-
-        self.page.type('input[id="filename"]', pmhc_filename)
         pmhc_username = self.user_info["username"]
-        self.page.type('input[id="user.username"]', pmhc_username)
-        self.page.select_option("#test", value="1")
-        self.page.locator('"Apply"').click()
-        self.page.wait_for_load_state()
-        time.sleep(4)
 
-        parent_div_obj = self.page.query_selector(".ag-center-cols-container")
-        parent_div = parent_div_obj.inner_html()
-        if not parent_div:
+        # this search should return exactly one result
+        filter_page = f"https://pmhc-mds.net/api/uploads?filename={pmhc_filename}&username={pmhc_username}&test=1&sort=-date"
+        filter_json = self.get_json_request(filter_page)
+
+        num_filter_json_results = len(filter_json)
+        if num_filter_json_results != 1:
             raise CouldNotFindPmhcUpload(
-                f"Could not find PMHC upload for filename: {pmhc_filename}"
+                f"Expected 1 filter search result - received {num_filter_json_results}"
             )
 
-        # Use bs4 to isolate the columns we want
-        # 'Upload ID' should be the first child <span> column
-        # 'Status should' be the last child <span> column
-        soup = BeautifulSoup(parent_div, "html.parser")
-        spans = soup.find_all("span", {"class": "ag-cell-value"})
-        upload_id = spans[0].text
+        uuid = filter_json[0]["uuid"]
 
-        # save other helpful data from PMHC
-        # occasionally some of these variables from PMHC contain newline characters
-        self.upload_date = spans[1].text
-        self.upload_date = self.upload_date.strip("\n")
+        # the first 8 chars of the uuid is the upload_id
+        self.upload_id = uuid[:8]
 
-        # extract upload link
-        upload_link = soup.find("a", class_="upload-filename-link")["href"]
-        self.upload_link = f"https://pmhc-mds.net/{upload_link}"
-        self.upload_link = self.upload_link.strip("\n")
+        # set other properties the class will use later
+        # Convert the PMHC UTC date string into a formatted AEST datetime
+        pmhc_utc_date = filter_json[0]["date"]
 
-        # save status of this upload
-        complete_text = spans[7].text
+        # Convert the date string to a datetime object in UTC
+        datetime_obj_utc = datetime.strptime(
+            pmhc_utc_date, "%Y-%m-%dT%H:%M:%S.%fZ"
+        ).replace(tzinfo=pytz.UTC)
 
-        if complete_text == "complete":
+        # Convert the datetime object to AEST timezone
+        aest_timezone = pytz.timezone("Australia/Sydney")
+        datetime_obj_aest = datetime_obj_utc.astimezone(aest_timezone)
+
+        # Format the datetime object as per the desired format
+        self.upload_date = datetime_obj_aest.strftime("%d/%m/%Y %I:%M:%S %p")
+
+        self.upload_link = f"https://pmhc-mds.net/#/upload/details/{uuid}/PHN105"
+
+        self.upload_status = filter_json[0]["status"]
+        if self.upload_status == "complete":
             self.complete = True
         else:
             self.complete = False
 
-        # A valid PMHC upload_id should be 8 characters long
-        # this should catch any general errors with the bs4 scrapes to this point
-        if len(upload_id) == 8:
-            self.upload_id = upload_id
-
-            # status could be 'error', 'processing', or 'complete'
-            self.upload_status = spans[-1].text
-        else:
-            logging.error(
-                "Could not retrieve a valid PMHC upload_id for filename: "
-                f"'{pmhc_filename}'"
-            )
-            raise InvalidPmhcUploadId
-
         return self.upload_id
-
-    def get_upload_status(self) -> str:
-        """Gets the status of the last PMHC upload
-        self.find_upload_id() must be called prior to calling this method
-        status is typically 'error', 'processing', or 'complete'
-
-        Returns:
-            str: status of last upload e.g. 'error'
-        """
-        if self.upload_id and self.upload_status:
-            return self.upload_status
-        else:
-            logging.error(
-                "Could not retrieve PMHC upload_id and upload_status. Make sure\n"
-                "self.find_upload_id() has been called first before calling this method"
-            )
-            raise InvalidPmhcUploadId
-
-    def get_upload_link(self):
-        """Returns the most recent upload_link
-        self.find_upload_id() must be called prior to calling this method
-
-        Returns:
-            str: upload_link in format of:
-            https://pmhc-mds.net/#/upload/details/d1dda324-cd98-4910-b44e-4b5e99898ea9/PHN105
-        """
-        return self.upload_link
