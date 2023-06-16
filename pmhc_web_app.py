@@ -25,6 +25,7 @@ from pathlib import Path
 import pytz
 from playwright.sync_api import sync_playwright
 from rich.progress import track
+from rich.progress import track, Progress, TimeElapsedColumn
 
 
 class FileNotFoundException(Exception):
@@ -351,9 +352,9 @@ class PmhcWebApp:
             username = input("Enter PMHC username: ")
 
         while True:
-            password = getpass("Enter PMHC password (keyboard input will be hidden): ")
             if password:
                 break
+            password = getpass("Enter PMHC password (keyboard input will be hidden): ")
 
         logging.info("Logging into PMHC website")
         self.page.goto("https://pmhc-mds.net")
@@ -521,29 +522,20 @@ class PmhcWebApp:
     def wait_for_upload(self):
         """Waits for a PMHC upload to complete processing in 'test' mode"""
 
-        # delay between each check of PMHC Uploads page
-        delay = 30
-        counter = 1
-
-        while True:
-            # check to see if the PMHC upload queue is free
-            pmhc_username = self.user_info["username"]
-            if self.is_upload_processing():
-                logging.info(
-                    f"An upload is currently processing for '{pmhc_username}' "
-                    f"account, waiting for {delay} seconds..."
-                )
-            else:
-                logging.info(
-                    f"No upload is processing for '{pmhc_username}' account, "
-                    "so we can stop waiting now"
-                )
-                break
-
-            self.show_loading_bar(
-                delay, description=f"{counter} - Waiting for PMHC processing..."
+        # check to see if the PMHC upload queue is free
+        delay = 10
+        with Progress(*Progress.get_default_columns(), TimeElapsedColumn()) as progress:
+            processing_task = progress.add_task(
+                "Checking PMHC upload queue...", total=None
             )
-            counter += 1
+            while True:
+                if self.is_upload_processing():
+                    progress.update(
+                        processing_task, description="Waiting for PMHC processing..."
+                    )
+                    time.sleep(delay)
+                else:
+                    break
 
     def download_error_json(self, upload_id: str) -> Path:
         """Downloads a JSON error file from PMHC
