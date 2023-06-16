@@ -449,7 +449,7 @@ class PmhcWebApp:
             f"{input_file.suffix}"
         )
 
-        print(
+        logging.info(
             f"New dynamically generated round {round_count} filename is: "
             f"'{self.upload_filename}'"
         )
