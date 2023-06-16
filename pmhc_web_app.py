@@ -627,7 +627,7 @@ class PmhcWebApp:
             if "status" in json and json["status"] == "processing":
                 return True
 
-        # all ok if
+        # all ok, none are processing, we are free to now upload a new file
         return False
 
     def find_upload_id(self, pmhc_filename: str) -> str:
