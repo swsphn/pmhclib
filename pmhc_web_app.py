@@ -11,8 +11,6 @@
 # PMHC_USERNAME
 # PMHC_PASSWORD
 #
-from datetime import datetime
-import pytz
 import logging
 import os
 import platform
@@ -24,7 +22,7 @@ from datetime import datetime
 from getpass import getpass
 from pathlib import Path
 
-from bs4 import BeautifulSoup
+import pytz
 from playwright.sync_api import sync_playwright
 from rich.progress import track
 
@@ -62,6 +60,7 @@ class PmhcWebApp:
     upload_link = None
     upload_date = None
     default_timeout = 60000
+    phn_identifier = "PHN105"
     db_conn = None  # sqlite database connection object
     db_file = "pmhc_web_app.db"
 
@@ -437,7 +436,7 @@ class PmhcWebApp:
 
         # copy and rename the user file so we can find it again when it is uploaded
         # to PMHC. New filename should be in the format of:
-        # YYYYMMDD_HHMMSS_round1.xlsx
+        # round_4_PMHC_MDS_20200708_20200731_1686875652.zip
         current_timestamp = round(time.time())
 
         # self.upload_filename will be used by other class methods
@@ -566,7 +565,7 @@ class PmhcWebApp:
         time.sleep(0.5)
         for upload in id_json:
             uuid = upload["uuid"]
-            url = f"https://pmhc-mds.net/api/organisations/PHN105/uploads/{uuid}"
+            url = f"https://pmhc-mds.net/api/organisations/{self.phn_identifier}/uploads/{uuid}"
             upload_errors_json = self.page.request.get(url)
 
             filename = f"{self.downloads_folder}/{upload_id}.json"
@@ -673,7 +672,7 @@ class PmhcWebApp:
         # Format the datetime object as per the desired format
         self.upload_date = datetime_obj_aest.strftime("%d/%m/%Y %I:%M:%S %p")
 
-        self.upload_link = f"https://pmhc-mds.net/#/upload/details/{uuid}/PHN105"
+        self.upload_link = f"https://pmhc-mds.net/#/upload/details/{uuid}/{self.phn_identifier}"
 
         self.upload_status = filter_json[0]["status"]
         if self.upload_status == "complete":
