@@ -327,7 +327,9 @@ class PmhcWebApp:
         username = os.getenv("PMHC_USERNAME")
         password = os.getenv("PMHC_PASSWORD")
 
-        if not username or not password:
+        while True:
+            if username:
+                break
             if platform.system() == "Windows":
                 logging.debug(
                     "In future, consider setting the following environment variables "
@@ -347,7 +349,11 @@ class PmhcWebApp:
                     "read -rs PMHC_PASSWORD && export PMHC_PASSWORD"
                 )
             username = input("Enter PMHC username: ")
+
+        while True:
             password = getpass("Enter PMHC password (keyboard input will be hidden): ")
+            if password:
+                break
 
         logging.info("Logging into PMHC website")
         self.page.goto("https://pmhc-mds.net")
@@ -672,7 +678,9 @@ class PmhcWebApp:
         # Format the datetime object as per the desired format
         self.upload_date = datetime_obj_aest.strftime("%d/%m/%Y %I:%M:%S %p")
 
-        self.upload_link = f"https://pmhc-mds.net/#/upload/details/{uuid}/{self.phn_identifier}"
+        self.upload_link = (
+            f"https://pmhc-mds.net/#/upload/details/{uuid}/{self.phn_identifier}"
+        )
 
         self.upload_status = filter_json[0]["status"]
         if self.upload_status == "complete":
