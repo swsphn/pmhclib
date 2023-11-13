@@ -376,27 +376,22 @@ class PmhcWebApp:
 
         print("Logging into PMHC website")
         self.page.goto("https://pmhc-mds.net")
-        self.random_delay()
+        self.page.wait_for_load_state()
         self.page.locator('[id="loginBtn"]').click()
-        self.random_delay()
-        self.page.type('input[id="username"]', username)
-        self.page.type('input[id="password"]', password)
+        self.page.wait_for_load_state()
 
-        # target the 'Continue' submit button. Note from 25/05/2023 there are now
-        # two of them: the first hidden one (a decoy!), the second visible
-        # one (real). We need to isolate the correct one based on its attributes
-        buttons = self.page.locator("button:text('Continue')").all()
+        logging.info("Entering username")
+        username_field = self.page.locator('input[id="username"]')
+        username_field.fill(username)
+        username_field.press('Enter')
+        self.page.wait_for_load_state()
 
-        if buttons:
-            for button in buttons:
-                # the real button contains 'data-action-button-primary' attribute
-                if button.get_attribute("data-action-button-primary"):
-                    button.click()
-        else:
-            raise MissingPmhcElement("Could not find 'Continue' button on login page")
+        logging.info("Entering password")
+        password_field = self.page.locator('input[id="password"]')
+        password_field.fill(password)
+        password_field.press('Enter')
 
         self.page.wait_for_load_state()
-        self.random_delay()
 
         # confirm login was successful
         user_query = self.page.request.get("https://pmhc-mds.net/api/current-user")
