@@ -53,6 +53,22 @@ class CouldNotFindPmhcUpload(Exception):
 
 
 class PmhcWebApp:
+    """This class wraps the unofficial PMHC API. Use it to automate
+    tasks such as uploading to the PMHC website, downloading error
+    reports, downloading PMHC extracts, etc.
+
+    Usage:
+
+    This class is intended to be used as a context manager. This ensures
+    that the playwright browser context is correctly closed. For
+    example:
+
+    >>> with PmhcWebApp() as pmhc:
+    ...     pmhc.login()
+    ...     pmhc.download_error_json('7f91a4f5')
+
+    """
+
     def __enter__(self):
         # Initialise playwright without a context manager
         self.p = sync_playwright().start()
