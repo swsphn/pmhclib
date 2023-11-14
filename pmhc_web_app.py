@@ -170,9 +170,6 @@ class PmhcWebApp:
         # get the filesize of input_file for matching purposes
         original_input_file_size = original_input_file.stat().st_size
 
-        # strip off everything but the filename from input_file, e.g. remove C:\test\
-        original_input_file_stripped = original_input_file.name
-
         insert_sql = f"""
             INSERT INTO save_points (
                 upload_id,
@@ -189,7 +186,7 @@ class PmhcWebApp:
             )
             VALUES (
                 '{upload_id}',
-                '{original_input_file_stripped}',
+                '{ original_input_file.name}',
                 '{original_input_file_size}',
                 '{pmhc_filename}',
                 '{errors_removed_file}',
@@ -254,9 +251,6 @@ class PmhcWebApp:
         # get input_file_size
         original_input_file_size = original_input_file.stat().st_size
 
-        # strip off everything but the filename from input_file, e.g. remove C:\test\
-        original_input_file_stripped = original_input_file.name
-
         # get current save_point
         current_sql = f"""
         SELECT id, num_pmhc_errors FROM save_points
@@ -272,7 +266,7 @@ class PmhcWebApp:
         # get prior save_point matching same file/filesize
         old_sql = f"""
         SELECT id, num_pmhc_errors FROM save_points
-        WHERE original_input_file = '{original_input_file_stripped}'
+        WHERE original_input_file = '{original_input_file.name}'
         AND original_input_file_size = '{original_input_file_size}'
         AND id < '{id}'
         ORDER BY id DESC
@@ -305,12 +299,9 @@ class PmhcWebApp:
         # get input_file_size
         original_input_file_size = original_input_file.stat().st_size
 
-        # strip off everything but the filename from input_file, e.g. remove C:\test\
-        original_input_file_stripped = original_input_file.name
-
         select_sql = f"""
         SELECT * FROM save_points
-        WHERE original_input_file = '{original_input_file_stripped}'
+        WHERE original_input_file = '{original_input_file.name}'
         AND original_input_file_size = '{original_input_file_size}'
         ORDER BY id ASC
         """
