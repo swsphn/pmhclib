@@ -53,18 +53,6 @@ class CouldNotFindPmhcUpload(Exception):
 
 
 class PmhcWebApp:
-    # class properties
-    user_info = None
-    upload_filename = None
-    upload_id = None
-    upload_status = None
-    upload_link = None
-    upload_date = None
-    default_timeout = 60000
-    phn_identifier = "PHN105"
-    db_conn = None  # sqlite database connection object
-    db_file = "pmhc_web_app.db"
-
     def __enter__(self):
         # Initialise playwright without a context manager
         self.p = sync_playwright().start()
@@ -84,6 +72,25 @@ class PmhcWebApp:
         start_time: datetime,
         headless: True,
     ):
+        # user_info is set by login()
+        self.user_info = None
+        # upload_status is set by find_upload_id(), and is not used
+        # anywhere else in this class, so it should be demoted from an
+        # instance attribute to a method local variable. That is, the
+        # following line should be deleted, and upload_status should
+        # only exist inside the find_upload_id() method. However, we
+        # can't remove it easily, because it is coupled to the main
+        # function in remove_pmhc_mds_errors.py. This will need to be
+        # refactored first to not depend on fetching the upload_status
+        # from this class.
+        self.upload_status = None
+        self.upload_link = None
+        self.upload_date = None
+        self.default_timeout = 60000
+        self.phn_identifier = "PHN105"
+        self.db_conn = None  # sqlite database connection object
+        self.db_file = "pmhc_web_app.db"
+
         # save whether to use a headless browser instance or not
         self.headless = headless
         self.start_time = start_time
@@ -442,22 +449,20 @@ class PmhcWebApp:
         # round_4_PMHC_MDS_20200708_20200731_1686875652.zip
         current_timestamp = round(time.time())
 
-        # self.upload_filename will be used by other class methods
-        # e.g. to retrieve upload_id
-        self.upload_filename = (
+        upload_filename = (
             f"round_{round_count}_{original_input_file.stem}_{current_timestamp}"
             f"{input_file.suffix}"
         )
 
         logging.info(
             f"New dynamically generated round {round_count} filename is: "
-            f"'{self.upload_filename}'"
+            f"'{upload_filename}'"
         )
-        upload_filepath = f"{self.uploads_folder}/{self.upload_filename}"
+        upload_filepath = f"{self.uploads_folder}/{upload_filename}"
         shutil.copyfile(input_file, upload_filepath)
 
         print(
-            f"Uploading '{self.upload_filename}' to PMHC as a '{mode}' file\n"
+            f"Uploading '{upload_filename}' to PMHC as a '{mode}' file\n"
             "It usually takes approx 3-10 minutes for PMHC to process xlsx files "
             "depending on the number of months included in the data, less for zipped "
             "csv files (e.g. round 2 onward)"
@@ -496,13 +501,13 @@ class PmhcWebApp:
         upload_button.click()
         delay = 60
         print(
-            f"Uploading '{self.upload_filename}' to PMHC in '{mode}' mode, "
+            f"Uploading '{upload_filename}' to PMHC in '{mode}' mode, "
             f"waiting {delay} seconds..."
         )
         self.show_loading_bar(delay, description="Waiting for PMHC upload...")
         self.page.wait_for_load_state()
 
-        return self.upload_filename
+        return upload_filename
 
     def start_timer(self):
         """Start a timer. Useful in recording how long a PMHC upload takes to process"""
