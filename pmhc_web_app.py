@@ -67,11 +67,7 @@ class PmhcWebApp:
         self.browser.close()
         self.p.stop()
 
-    def __init__(
-        self,
-        start_time: datetime,
-        headless: True,
-    ):
+    def __init__(self, headless: bool = True):
         # user_info is set by login()
         self.user_info = None
         # upload_status is set by find_upload_id(), and is not used
@@ -93,7 +89,6 @@ class PmhcWebApp:
 
         # save whether to use a headless browser instance or not
         self.headless = headless
-        self.start_time = start_time
 
         self.downloads_folder = Path("downloads")
         self.downloads_folder.mkdir(parents=True, exist_ok=True)
