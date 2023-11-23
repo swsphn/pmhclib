@@ -427,10 +427,7 @@ class PmhcWebApp:
         # PMHC only allows one upload at a time per user account.
         # This usually only occurs if the user is also using their browser to upload
         # manually at the same time as running this script
-        # skip this check for live files which just need to be uploaded, they don't
-        # need to have matching done for JSON error file retrieval
-        if mode == "test":
-            self.wait_for_upload()
+        self.wait_for_upload()
 
         # copy and rename the user file so we can find it again when it is uploaded
         # to PMHC. New filename should be in the format of:
