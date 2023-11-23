@@ -278,12 +278,7 @@ class PmhcWebApp:
         old_result_dict = dict(zip(old_columns, old_row))
         old_num_pmhc_errors = old_result_dict["num_pmhc_errors"]
 
-        if old_row is None:
-            return False
-        elif old_num_pmhc_errors == current_num_pmhc_errors:
-            return True
-        else:
-            return False
+        return old_num_pmhc_errors == current_num_pmhc_errors
 
     def db_get_save_points(self, original_input_file: Path) -> dict:
         """gets all the savepoints for a given input_file
