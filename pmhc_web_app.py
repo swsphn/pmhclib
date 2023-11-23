@@ -332,9 +332,7 @@ class PmhcWebApp:
         username = os.getenv("PMHC_USERNAME")
         password = os.getenv("PMHC_PASSWORD")
 
-        while True:
-            if username:
-                break
+        while not username:
             if platform.system() == "Windows":
                 logging.debug(
                     "In future, consider setting the following environment variables "
@@ -355,9 +353,7 @@ class PmhcWebApp:
                 )
             username = input("Enter PMHC username: ")
 
-        while True:
-            if password:
-                break
+        while not password:
             password = getpass("Enter PMHC password (keyboard input will be hidden): ")
 
         print("Logging into PMHC website")
