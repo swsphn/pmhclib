@@ -365,13 +365,13 @@ class PmhcWebApp:
         logging.info("Entering username")
         username_field = self.page.locator('input[id="username"]')
         username_field.fill(username)
-        username_field.press('Enter')
+        username_field.press("Enter")
         self.page.wait_for_load_state()
 
         logging.info("Entering password")
         password_field = self.page.locator('input[id="password"]')
         password_field.fill(password)
-        password_field.press('Enter')
+        password_field.press("Enter")
 
         self.page.wait_for_load_state()
 
