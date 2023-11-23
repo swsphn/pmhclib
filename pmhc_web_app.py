@@ -412,7 +412,7 @@ class PmhcWebApp:
         """
 
         # check file looks ok
-        if input_file.suffix != ".xlsx" and input_file.suffix != ".zip":
+        if input_file.suffix not in (".xlsx", ".zip"):
             raise IncorrectFileType(
                 "Only .xlsx or .zip (containing multiple csv's) are acceptable PMHC "
                 "input files"
