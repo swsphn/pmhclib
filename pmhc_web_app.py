@@ -515,14 +515,11 @@ class PmhcWebApp:
             processing_task = progress.add_task(
                 "Checking PMHC upload queue...", total=None
             )
-            while True:
-                if self.is_upload_processing():
-                    progress.update(
-                        processing_task, description="Waiting for PMHC processing..."
-                    )
-                    time.sleep(delay)
-                else:
-                    break
+            while self.is_upload_processing():
+                progress.update(
+                    processing_task, description="Waiting for PMHC processing..."
+                )
+                time.sleep(delay)
 
     def download_error_json(self, upload_id: str) -> Path:
         """Downloads a JSON error file from PMHC
