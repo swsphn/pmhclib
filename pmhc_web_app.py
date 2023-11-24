@@ -12,6 +12,7 @@
 # PMHC_PASSWORD
 #
 import logging
+import mimetypes
 import os
 import platform
 import random
@@ -391,7 +392,7 @@ class PmhcWebApp:
         input_file: Path,
         original_input_file: Path,
         round_count: int,
-        mode: str = "test",
+        test: bool = True,
     ) -> Path:
         """Uploads a user specified file to PMHC website
 
@@ -400,8 +401,8 @@ class PmhcWebApp:
             original_input_file (Path): path to the original file
             e.g. 'PMHC_MDS_20230101_20230131.xlsx'
             round_count (int): What round of file this is e.g. 1, 2, 3 etc
-            mode (str): Upload in 'test' or 'live' mode? Defaults to 'test'.
-            Use 'live' with care!
+            test (bool): Upload in 'test' or 'live' mode? Defaults to True ('test').
+            Use False ('live') with care!
 
         Raises:
             IncorrectFileType: If user uploads a bad filetype
@@ -443,9 +444,10 @@ class PmhcWebApp:
             f"New dynamically generated round {round_count} filename is: "
             f"'{upload_filename}'"
         )
-        upload_filepath = f"{self.uploads_folder}/{upload_filename}"
+        upload_filepath = self.uploads_folder / upload_filename
         shutil.copyfile(input_file, upload_filepath)
 
+        mode = "test" if test else "live"
         print(
             f"Uploading '{upload_filename}' to PMHC as a '{mode}' file\n"
             "It usually takes approx 3-10 minutes for PMHC to process xlsx files "
@@ -453,44 +455,39 @@ class PmhcWebApp:
             "csv files (e.g. round 2 onward)"
         )
 
-        self.page.goto("https://pmhc-mds.net/#/upload/add")
-        self.page.wait_for_load_state()
+        # First PUT the file and receive a uuid
+        with open(upload_filepath, "rb") as file:
+            upload_response = self.page.request.put(
+                "https://uploader.strategicdata.com.au/upload",
+                multipart={
+                    "file": {
+                        "name": upload_filepath.name,
+                        "mimeType": mimetypes.guess_type(upload_filepath)[0],
+                        "buffer": file.read(),
+                    }
+                },
+            )
 
-        # upload in 'live' (e.g. completed file) or 'test' mode (error file)?
-        logging.debug("Clicking 'Upload as test data' checkbox")
-        if mode == "test":
-            self.page.locator('[id="testUploadCheckbox"]').click()
+        upload_status = upload_response.json()
+        logging.debug(f"Upload status:")
+        logging.debug(upload_status)
 
-        # This select field appears to be hard set from 13/06/2023 onward, so
-        # this code has been disabled for now. We may need it again in the future.
-        # logging.info("Clicking 'South Western Sydney ( PHN105 )'")
-        # self.page.locator('#uploadOrgSelect').click()
-        # self.page.select_option("#uploadOrgSelect", value="PHN105")
+        uuid = upload_status["id"]
 
-        # PMHC have hidden form fields which hold the filename etc
-        # reveal these to make our life easier when debugging
-        logging.debug("Unhiding #fileUpload field")
-        self.page.eval_on_selector(
-            "#fileUpload", "element => element.style.display = 'block'"
+        # Second POST the upload details
+        # This is required to register the upload with the PMHC portal
+        post_response = self.page.request.post(
+            "https://pmhc-mds.net/api/organisations/PHN105/uploads",
+            data={
+                "uuid": uuid,
+                "filename": upload_filepath.name,
+                "test": test,
+                "encoded_organisation_path": self.phn_identifier,
+            },
         )
-
-        logging.debug("Adding upload file details")
-        file_input = self.page.locator("#fileUpload")
-        file_input.set_input_files(upload_filepath)
-
-        logging.debug("Unhiding #uploadBtn")
-        upload_button = self.page.locator("#uploadBtn")
-        self.page.eval_on_selector("#uploadBtn", 'el => el.style.display = "block"')
-
-        logging.debug("Clicking #uploadBtn")
-        upload_button.click()
-        delay = 60
-        print(
-            f"Uploading '{upload_filename}' to PMHC in '{mode}' mode, "
-            f"waiting {delay} seconds..."
-        )
-        self.show_loading_bar(delay, description="Waiting for PMHC upload...")
-        self.page.wait_for_load_state()
+        logging.info("Upload details POST response:")
+        logging.info(post_response)
+        logging.info(post_response.text())
 
         return upload_filename
 
