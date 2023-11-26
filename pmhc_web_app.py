@@ -557,22 +557,6 @@ class PmhcWebApp:
         # we start getting multiple files coming back
         return filename
 
-    def get_json_request(self, url: str) -> str:
-        """gets the JSON response for a given request to PMHC website
-
-        Args:
-            url (str): the PMHC API url to query
-            e.g. https://pmhc-mds.net/api/current-user
-
-        Returns:
-            str: A string containing the JSON reponse from the request
-        """
-        self.page.goto(url)
-        self.page.wait_for_load_state()
-        user_query = self.page.request.get(url)
-
-        return user_query.json()
-
     def is_upload_processing(self) -> bool:
         """Checks if the user has an upload currently 'processing' in either live or
         test mode. Useful for checking before we do certain actions e.g. try upload
@@ -583,9 +567,9 @@ class PmhcWebApp:
         # Get a list of all this user's 'test' uploads ('processing', 'complete'
         # and 'error' status)
         pmhc_username = self.user_info["username"]
-        json_list = self.get_json_request(
+        json_list = self.page.request.get(
             f"https://pmhc-mds.net/api/uploads?username={pmhc_username}&sort=-date"
-        )
+        ).json()
         # see if any are in a 'processing' state
         for json in json_list:
             if "status" in json and json["status"] == "processing":
@@ -608,7 +592,7 @@ class PmhcWebApp:
 
         # this search should return exactly one result
         filter_page = f"https://pmhc-mds.net/api/uploads?filename={pmhc_filename}&username={pmhc_username}&test=1&sort=-date"
-        filter_json = self.get_json_request(filter_page)
+        filter_json = self.page.request.get(filter_page).json()
 
         num_filter_json_results = len(filter_json)
         if num_filter_json_results != 1:
