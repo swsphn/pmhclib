@@ -557,19 +557,6 @@ class PmhcWebApp:
         # we start getting multiple files coming back
         return filename
 
-    def show_loading_bar(self, delay: int, description: str):
-        """Shows a loading bar for a given amount of seconds
-        This is useful for delaying a script e.g. whilst a PMHC
-        upload processes
-
-        Args:
-            delay (int): number of seconds to show loading bar
-            description (str): Descriptive text to show user
-        """
-        # simulate some work being done to progress our loading bar
-        for _i in track(range(delay), description=description):
-            time.sleep(1)
-
     def get_json_request(self, url: str) -> str:
         """gets the JSON response for a given request to PMHC website
 
