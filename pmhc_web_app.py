@@ -546,7 +546,7 @@ class PmhcWebApp:
             url = f"https://pmhc-mds.net/api/organisations/{self.phn_identifier}/uploads/{uuid}"
             upload_errors_json = self.page.request.get(url)
 
-            filename = f"{self.downloads_folder}/{upload_id}.json"
+            filename = self.downloads_folder / f"{upload_id}.json"
             with open(filename, "wb") as file:
                 file.write(upload_errors_json.body())
 
@@ -555,7 +555,7 @@ class PmhcWebApp:
         # return whatever json file it last found to calling script
         # We'll need to make this more robust in the near future if
         # we start getting multiple files coming back
-        return Path(filename)
+        return filename
 
     def show_loading_bar(self, delay: int, description: str):
         """Shows a loading bar for a given amount of seconds
