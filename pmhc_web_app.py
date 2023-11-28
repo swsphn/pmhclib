@@ -714,67 +714,57 @@ class PmhcWebApp:
         with Progress(*Progress.get_default_columns(), TimeElapsedColumn()) as progress:
             extract_task = progress.add_task("Checking for PMHC extract...", total=None)
 
-            with sync_playwright() as p:
-                browser = p.chromium.launch(headless=self.headless)
-                context = browser.new_context(storage_state=self.STATE)
-                context.set_default_timeout(self.default_timeout)
-                page = context.new_page()
-
-                while True:
-                    # Get list of recently requested data extracts
-                    logging.debug("Looping to look for data extracts")
-                    downloads = page.request.get(
-                        "https://pmhc-mds.net/api/extract",
-                        params={"sort": "-date"},
-                    ).json()
-
-                    completed_downloads = filter(match_completed_downloads, downloads)
-                    latest_completed_download = next(completed_downloads, None)
-                    matching_downloads = filter(match_downloads, downloads)
-                    latest_matching_download = next(matching_downloads, None)
-
-                    if latest_completed_download:
-                        # Just use the pre-existing download
-                        logging.info("Extract ready")
-                        download_uuid = latest_completed_download["uuid"]
-                        break
-                    elif latest_matching_download:
-                        # Wait for pre-queued download to become ready
-                        progress.update(
-                            extract_task, description="Waiting for extract..."
-                        )
-                        wait_time = 30
-                        time.sleep(wait_time)
-                    else:
-                        # Queue download from PMHC
-                        progress.update(extract_task, description="Queuing extract...")
-                        page.request.get(
-                            "https://pmhc-mds.net/api/extract/csv",
-                            params={
-                                "organisation_path": f"{self.organisation_path}",
-                                "encoded_organisation_path": f"{self.organisation_path}",
-                                "file_type": "csv",
-                                "start_date": f"{start_date:%Y-%m-%d}",
-                                "end_date": f"{end_date:%Y-%m-%d}",
-                                "childless": "false",
-                                "all_episode_children": "false",
-                                "metaspec": "false",
-                                "multiple_delivery_orgs": "false",
-                                "all_commissioned_organisations": "false",
-                            },
-                        )
-
-                download_url_json = page.request.get(
-                    f"https://pmhc-mds.net/api/extract/{download_uuid}/fetch"
+            while True:
+                # Get list of recently requested data extracts
+                logging.debug("Looping to look for data extracts")
+                downloads = self.page.request.get(
+                    "https://pmhc-mds.net/api/extract",
+                    params={"sort": "-date"},
                 ).json()
-                download_url = download_url_json["location"]
 
-                download = page.request.get(download_url)
-                output_file = (
-                    output_directory / f"PMHC_extract_{start_date}_{end_date}.zip"
-                )
-                logging.info(f"Saving output to {output_file}")
-                with open(output_file, "wb") as fp:
-                    fp.write(download.body())
+                completed_downloads = filter(match_completed_downloads, downloads)
+                latest_completed_download = next(completed_downloads, None)
+                matching_downloads = filter(match_downloads, downloads)
+                latest_matching_download = next(matching_downloads, None)
 
-                return output_file
+                if latest_completed_download:
+                    # Just use the pre-existing download
+                    logging.info("Extract ready")
+                    download_uuid = latest_completed_download["uuid"]
+                    break
+                elif latest_matching_download:
+                    # Wait for pre-queued download to become ready
+                    progress.update(extract_task, description="Waiting for extract...")
+                    wait_time = 30
+                    time.sleep(wait_time)
+                else:
+                    # Queue download from PMHC
+                    progress.update(extract_task, description="Queuing extract...")
+                    self.page.request.get(
+                        "https://pmhc-mds.net/api/extract/csv",
+                        params={
+                            "organisation_path": f"{self.organisation_path}",
+                            "encoded_organisation_path": f"{self.organisation_path}",
+                            "file_type": "csv",
+                            "start_date": f"{start_date:%Y-%m-%d}",
+                            "end_date": f"{end_date:%Y-%m-%d}",
+                            "childless": "false",
+                            "all_episode_children": "false",
+                            "metaspec": "false",
+                            "multiple_delivery_orgs": "false",
+                            "all_commissioned_organisations": "false",
+                        },
+                    )
+
+            download_url_json = self.page.request.get(
+                f"https://pmhc-mds.net/api/extract/{download_uuid}/fetch"
+            ).json()
+            download_url = download_url_json["location"]
+
+            download = self.page.request.get(download_url)
+            output_file = output_directory / f"PMHC_extract_{start_date}_{end_date}.zip"
+            logging.info(f"Saving output to {output_file}")
+            with open(output_file, "wb") as fp:
+                fp.write(download.body())
+
+            return output_file
