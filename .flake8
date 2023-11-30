@@ -1,0 +1,21 @@
+[flake8]
+require-plugins = flake8-bugbear
+
+# Taken from black recommendations
+# https://black.readthedocs.io/en/stable/the_black_code_style/current_style.html#line-length
+max-line-length = 88
+
+# select flake8 default warnings plus flake8-bugbear
+# (requires flake8-bugbear to be installed)
+# Explicitly select B950, as it is a non-default warning.
+# Select W504 and ignore W503 for compatability with black:
+# https://black.readthedocs.io/en/stable/faq.html#why-are-flake8-s-e203-and-w503-violated
+select = C,E,F,W,W504,B,B950
+
+# Ignore warnings which conflict with black style or are too strict:
+# E203 whitespace before ':' conflicts with black style
+# E501 line too long is too strict. Instead we use flake8-bugbear's B950 line
+# length warning which only warns when the line length is exceeded by over 10%.
+# B008 Do not perform function calls in argument defaults is too strict and
+# conflicts with typer.
+extend-ignore = E203, E501, W503, B008
