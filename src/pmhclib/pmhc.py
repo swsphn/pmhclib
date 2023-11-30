@@ -2,8 +2,7 @@
 # their corresponding error JSON files.
 # The script uses Python Playwright to do this
 # This script is useful when doing multiple error removal runs with
-# remove_pmhc_mds_errors.py as it saves time and ensures you always get the correct
-# corresponding error file. Tested under Ubuntu WSL and PowerShell.
+# Tested under Ubuntu WSL and PowerShell.
 # --no-headless runs best under PowerShell (it's slower under Ubuntu WSL)
 #
 # No login details are saved anywhere
@@ -15,9 +14,7 @@ import logging
 import mimetypes
 import os
 import platform
-import random
 import shutil
-import sqlite3
 import time
 from dataclasses import dataclass
 from datetime import datetime, date
@@ -28,8 +25,7 @@ from typing import Optional
 
 import pytz
 from playwright.sync_api import sync_playwright
-from rich.progress import track
-from rich.progress import track, Progress, TimeElapsedColumn
+from rich.progress import Progress, TimeElapsedColumn
 
 
 class FileNotFoundException(Exception):
@@ -40,16 +36,8 @@ class IncorrectFileType(Exception):
     """Custom error handler for when an incorrect file is provided"""
 
 
-class InvalidPmhcUploadId(Exception):
-    """Custom error handler for when we cannot find a PMHC upload_id"""
-
-
 class InvalidPmhcUser(Exception):
     """Custom error handler for when a PMHC login is unsuccessful"""
-
-
-class MissingPmhcElement(Exception):
-    """Custom error handler for when PMHC page returns incorrect Playwright element"""
 
 
 class CouldNotFindPmhcUpload(Exception):
@@ -72,7 +60,7 @@ class PMHCSpecification(PMHCSpecificationRepresentation, Enum):
     WAYBACK = "wayback", "WAYBACK 3.0"
 
 
-class PmhcWebApp:
+class PMHC:
     """This class wraps the unofficial PMHC API. Use it to automate
     tasks such as uploading to the PMHC website, downloading error
     reports, downloading PMHC extracts, etc.
@@ -83,7 +71,7 @@ class PmhcWebApp:
     that the playwright browser context is correctly closed. For
     example:
 
-    >>> with PmhcWebApp() as pmhc:
+    >>> with PMHC() as pmhc:
     ...     pmhc.login()
     ...     pmhc.download_error_json('7f91a4f5')
 
@@ -131,217 +119,6 @@ class PmhcWebApp:
 
         self.uploads_folder = Path("uploads")
         self.uploads_folder.mkdir(parents=True, exist_ok=True)
-
-        # setup sqlite database for saving/resuming PMHC uploads
-        self.db_setup()
-
-    def db_setup(self):
-        """Sets up sqlite database"""
-        #
-        self.db_conn = sqlite3.connect(self.db_file)
-
-        sql = """
-        CREATE TABLE IF NOT EXISTS save_points
-            (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                upload_id TEXT NOT NULL,
-                original_input_file TEXT NOT NULL,
-                original_input_file_size INTEGER NOT NULL,
-                pmhc_filename TEXT NOT NULL,
-                errors_removed_file TEXT,
-                round_count INTEGER NOT NULL,
-                num_pmhc_errors INTEGER NOT NULL,
-                upload_date DATETIME,
-                upload_link TEXT NOT NULL,
-                processing_time INTEGER NOT NULL,
-                complete BOOLEAN NOT NULL DEFAULT 0
-            )
-        """
-        self.db_conn.execute(sql)
-
-    def db_create_save_point(
-        self,
-        upload_id: str,
-        original_input_file: Path,
-        pmhc_filename: str,
-        errors_removed_file: Path,
-        round_count: int,
-        num_pmhc_errors: int,
-        processing_time: int,
-    ) -> int:
-        """Creates a new save point which the user can resume from in future
-
-        Args:
-            upload_id (str): PMHC upload_id e.g. 09cbed58
-            original_input_file (Path): PMHC input_file
-            e.g. PMHC_MDS_20230101_20230512.xlsx
-            pmhc_filename (str): the dynmically generated filename which was uploaded to
-            PMHC e.g. a7ca62e9_20230526_091643_round_3.zip
-            errors_removed_file (Path): File with errors removed uploaded to PMHC
-            e.g. errors_removed\9d9b43d9.zip
-            round_count (int): which round the user is currently up to e.g. 2
-            num_pmhc_errors (int): number of errors returned by PMHC
-            processing_time (int): number of seconds it took PMHC to process the file
-
-        Returns:
-            int: the id of the new save_point
-        """
-
-        # get the filesize of input_file for matching purposes
-        original_input_file_size = original_input_file.stat().st_size
-
-        insert_sql = f"""
-            INSERT INTO save_points (
-                upload_id,
-                original_input_file,
-                original_input_file_size,
-                pmhc_filename,
-                errors_removed_file,
-                round_count,
-                num_pmhc_errors,
-                upload_date,
-                upload_link,
-                processing_time,
-                complete
-            )
-            VALUES (
-                '{upload_id}',
-                '{ original_input_file.name}',
-                '{original_input_file_size}',
-                '{pmhc_filename}',
-                '{errors_removed_file}',
-                '{round_count}',
-                '{num_pmhc_errors}',
-                '{self.upload_date}',
-                '{self.upload_link}',
-                '{processing_time}',
-                {self.complete}
-            )
-        """
-        try:
-            cursor = self.db_conn.execute(insert_sql)
-            self.db_conn.commit()
-            save_point_id = cursor.lastrowid
-        except sqlite3.Error as e:
-            # Handle the SQLite error
-            logging.exception("SQLite Error: %s", e)
-
-        return save_point_id
-
-    def db_get_save_point(self, save_point_id: int) -> dict:
-        """Gets a particular save_point for a given save_point_id
-
-        Args:
-            id (int): save_point_id e.g. 2
-
-        Returns:
-            dict: returns a dictionary with fields from save_points table
-        """
-
-        select_sql = f"""
-        SELECT * FROM save_points
-        WHERE id = '{save_point_id}' LIMIT 1
-        """
-
-        cursor = self.db_conn.execute(select_sql)
-        row = cursor.fetchone()
-
-        if row is None:
-            return {}
-        else:
-            columns = [column[0] for column in cursor.description]
-            result_dict = dict(zip(columns, row))
-            return result_dict
-
-    def db_does_error_count_match_last_round(
-        self, original_input_file: Path, id: int
-    ) -> bool:
-        """Checks if same number of errors in current round compared to prior round.
-        Useful in warning the user if they are entering an endless loop where they get
-        the same errors each round due to the script not being able to remove them.
-
-        Args:
-            original_input_file (Path): e.g. PMHC_MDS_20200708_20200731.xlsx
-            id (int): save_point_id of current round e.g. 8
-
-        Returns:
-            bool: True if error counts match
-        """
-
-        # get input_file_size
-        original_input_file_size = original_input_file.stat().st_size
-
-        # get current save_point
-        current_sql = f"""
-        SELECT id, num_pmhc_errors FROM save_points
-        WHERE id = '{id}'
-        LIMIT 1
-        """
-        current_cursor = self.db_conn.execute(current_sql)
-        current_row = current_cursor.fetchone()
-        current_columns = [column[0] for column in current_cursor.description]
-        current_result_dict = dict(zip(current_columns, current_row))
-        current_num_pmhc_errors = current_result_dict["num_pmhc_errors"]
-
-        # get prior save_point matching same file/filesize
-        old_sql = f"""
-        SELECT id, num_pmhc_errors FROM save_points
-        WHERE original_input_file = '{original_input_file.name}'
-        AND original_input_file_size = '{original_input_file_size}'
-        AND id < '{id}'
-        ORDER BY id DESC
-        LIMIT 1
-        """
-        old_cursor = self.db_conn.execute(old_sql)
-        old_row = old_cursor.fetchone()
-        old_columns = [column[0] for column in old_cursor.description]
-        old_result_dict = dict(zip(old_columns, old_row))
-        old_num_pmhc_errors = old_result_dict["num_pmhc_errors"]
-
-        return old_num_pmhc_errors == current_num_pmhc_errors
-
-    def db_get_save_points(self, original_input_file: Path) -> dict:
-        """gets all the savepoints for a given input_file
-
-        Args:
-            original_input_file (Path): PMHC input_file
-            e.g. PMHC_MDS_20230101_20230512.xlsx
-
-        Returns:
-            dict: dictionary containing rows from save_points table
-        """
-
-        # get input_file_size
-        original_input_file_size = original_input_file.stat().st_size
-
-        select_sql = f"""
-        SELECT * FROM save_points
-        WHERE original_input_file = '{original_input_file.name}'
-        AND original_input_file_size = '{original_input_file_size}'
-        ORDER BY id ASC
-        """
-
-        cursor = self.db_conn.execute(select_sql)
-        rows = cursor.fetchall()
-
-        # Convert the fetched rows to a dictionary
-        columns = [column[0] for column in cursor.description]
-        result_dict = [dict(zip(columns, row)) for row in rows]
-
-        return result_dict
-
-    def random_delay(self, min: int = 1, max: int = 3):
-        """Delays the script for a random number of seconds
-        Useful in slowing down playwright to make it look more human-like and not
-        upset PMHC website which appears to dislike too much login page activity
-
-        Args:
-            min (int, optional): minimum delay in seconds. Defaults to 1.
-            max (int, optional): maximum delay in seconds. Defaults to 3.
-
-        """
-        random_number = random.uniform(min, max)
-        time.sleep(random_number)
 
     def login(self):
         """Logs in to PMHC website. This allows us to reuse the login the session
@@ -510,21 +287,6 @@ class PmhcWebApp:
 
         return upload_filename
 
-    def start_timer(self):
-        """Start a timer. Useful in recording how long a PMHC upload takes to process"""
-        self.start_timestamp = datetime.now()
-
-    def stop_timer(self) -> int:
-        """Stops a timer started with start_timer() and returns the value in minutes
-
-        Returns:
-            int: number of minutes the timer ran for
-        """
-        end_timestamp = datetime.now()
-        elapsed_time = end_timestamp - self.start_timestamp
-        elapsed_minutes = elapsed_time.total_seconds() / 60
-        return round(elapsed_minutes, 1)
-
     def wait_for_upload(self):
         """Waits for a PMHC upload to complete processing in 'test' mode"""
 
@@ -651,31 +413,6 @@ class PmhcWebApp:
             self.complete = False
 
         return self.upload_id
-
-    def get_last_upload_status(self) -> str:
-        """Gets the status of the last PMHC upload
-        self.find_upload_id() must be called prior to calling this method
-        status is typically 'error', 'processing', or 'complete'
-
-        Returns:
-            str: status of last upload e.g. 'error'
-        """
-        if self.upload_id and self.upload_status:
-            return self.upload_status
-        else:
-            logging.error(
-                "Could not retrieve PMHC upload_id and upload_status. Make sure\n"
-                "self.find_upload_id() has been called first before calling this method"
-            )
-            raise InvalidPmhcUploadId
-
-    def pause(self, msg="\nPress ENTER to continue or CTRL + C to quit..."):
-        """Helps the user read messages or errors before Python continues on
-
-        Args:
-            msg (str, optional): Message to the user. Defaults to above value.
-        """
-        input(f"\n{msg}")
 
     def download_pmhc_mds(
         self,
