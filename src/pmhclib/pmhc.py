@@ -23,7 +23,6 @@ from getpass import getpass
 from pathlib import Path
 from typing import Optional
 
-import pytz
 from playwright.sync_api import sync_playwright
 from rich.progress import Progress, TimeElapsedColumn
 
@@ -105,7 +104,6 @@ class PMHC:
         # from this class.
         self.upload_status = None
         self.upload_link = None
-        self.upload_date = None
         self.default_timeout = 60000
         self.phn_identifier = "PHN105"
         self.db_conn = None  # sqlite database connection object
@@ -385,22 +383,6 @@ class PMHC:
 
         # the first 8 chars of the uuid is the upload_id
         self.upload_id = uuid[:8]
-
-        # set other properties the class will use later
-        # Convert the PMHC UTC date string into a formatted AEST datetime
-        pmhc_utc_date = filter_json[0]["date"]
-
-        # Convert the date string to a datetime object in UTC
-        datetime_obj_utc = datetime.strptime(
-            pmhc_utc_date, "%Y-%m-%dT%H:%M:%S.%fZ"
-        ).replace(tzinfo=pytz.UTC)
-
-        # Convert the datetime object to AEST timezone
-        aest_timezone = pytz.timezone("Australia/Sydney")
-        datetime_obj_aest = datetime_obj_utc.astimezone(aest_timezone)
-
-        # Format the datetime object as per the desired format
-        self.upload_date = datetime_obj_aest.strftime("%d/%m/%Y %I:%M:%S %p")
 
         self.upload_link = (
             f"https://pmhc-mds.net/#/upload/details/{uuid}/{self.phn_identifier}"
