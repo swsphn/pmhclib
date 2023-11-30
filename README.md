@@ -9,13 +9,13 @@ This script is setup as a Python package. You should be able to install
 it directly with `pip` or `poetry`:
 
 ``` sh
-pip install pmhclib@https://github.com/swsphn/pmhclib.git
+pip install pmhclib@git+https://github.com/swsphn/pmhclib.git
 ```
 
 OR
 
 ``` sh
-poetry add pmhclib@https://github.com/swsphn/pmhclib.git
+poetry add pmhclib@git+https://github.com/swsphn/pmhclib.git
 ```
 
 This will install `pmhclib` as an importable Python library.
