@@ -43,6 +43,13 @@ class CouldNotFindPmhcUpload(Exception):
     """Custom error handler for when an upload cannot be found on PMHC"""
 
 
+class SecureString(str):
+    """Show *** instead of string value in tracebacks"""
+
+    def __repr__(self):
+        return "***"
+
+
 @dataclass
 class PMHCSpecificationRepresentation:
     term: str
@@ -93,30 +100,11 @@ class PMHC:
     def __init__(self, headless: bool = True):
         # user_info is set by login()
         self.user_info = None
-        # upload_status is set by find_upload_id(), and is not used
-        # anywhere else in this class, so it should be demoted from an
-        # instance attribute to a method local variable. That is, the
-        # following line should be deleted, and upload_status should
-        # only exist inside the find_upload_id() method. However, we
-        # can't remove it easily, because it is coupled to the main
-        # function in remove_pmhc_mds_errors.py. This will need to be
-        # refactored first to not depend on fetching the upload_status
-        # from this class.
-        self.upload_status = None
-        self.upload_link = None
         self.default_timeout = 60000
         self.phn_identifier = "PHN105"
-        self.db_conn = None  # sqlite database connection object
-        self.db_file = "pmhc_web_app.db"
 
         # save whether to use a headless browser instance or not
         self.headless = headless
-
-        self.downloads_folder = Path("downloads")
-        self.downloads_folder.mkdir(parents=True, exist_ok=True)
-
-        self.uploads_folder = Path("uploads")
-        self.uploads_folder.mkdir(parents=True, exist_ok=True)
 
     def login(self):
         """Logs in to PMHC website. This allows us to reuse the login the session
@@ -125,7 +113,7 @@ class PMHC:
 
         # Prompt user for credentials if not set in env.
         username = os.getenv("PMHC_USERNAME")
-        password = os.getenv("PMHC_PASSWORD")
+        password = SecureString(os.getenv("PMHC_PASSWORD") or "")
 
         while not username:
             if platform.system() == "Windows":
@@ -149,7 +137,9 @@ class PMHC:
             username = input("Enter PMHC username: ")
 
         while not password:
-            password = getpass("Enter PMHC password (keyboard input will be hidden): ")
+            password = SecureString(
+                getpass("Enter PMHC password (keyboard input will be hidden): ")
+            )
 
         print("Logging into PMHC website")
         self.page.goto("https://pmhc-mds.net")
@@ -184,19 +174,15 @@ class PMHC:
     def upload_file(
         self,
         input_file: Path,
-        original_input_file: Path,
-        round_count: int,
         test: bool = True,
     ) -> Path:
         """Uploads a user specified file to PMHC website
 
         Args:
             input_file (Path): path to the file e.g. 'cc9dd7b5.csv'
-            original_input_file (Path): path to the original file
-            e.g. 'PMHC_MDS_20230101_20230131.xlsx'
-            round_count (int): What round of file this is e.g. 1, 2, 3 etc
+                e.g. 'PMHC_MDS_20230101_20230131.xlsx'
             test (bool): Upload in 'test' or 'live' mode? Defaults to True ('test').
-            Use False ('live') with care!
+                Use False ('live') with care!
 
         Raises:
             IncorrectFileType: If user uploads a bad filetype
@@ -224,39 +210,22 @@ class PMHC:
         # manually at the same time as running this script
         self.wait_for_upload()
 
-        # copy and rename the user file so we can find it again when it is uploaded
-        # to PMHC. New filename should be in the format of:
-        # round_4_PMHC_MDS_20200708_20200731_1686875652.zip
-        current_timestamp = round(time.time())
-
-        upload_filename = (
-            f"round_{round_count}_{original_input_file.stem}_{current_timestamp}"
-            f"{input_file.suffix}"
-        )
-
-        logging.info(
-            f"New dynamically generated round {round_count} filename is: "
-            f"'{upload_filename}'"
-        )
-        upload_filepath = self.uploads_folder / upload_filename
-        shutil.copyfile(input_file, upload_filepath)
-
         mode = "test" if test else "live"
         print(
-            f"Uploading '{upload_filename}' to PMHC as a '{mode}' file\n"
+            f"Uploading '{input_file}' to PMHC as a '{mode}' file\n"
             "It usually takes approx 3-10 minutes for PMHC to process xlsx files "
             "depending on the number of months included in the data, less for zipped "
             "csv files (e.g. round 2 onward)"
         )
 
         # First PUT the file and receive a uuid
-        with open(upload_filepath, "rb") as file:
+        with open(input_file, "rb") as file:
             upload_response = self.page.request.put(
                 "https://uploader.strategicdata.com.au/upload",
                 multipart={
                     "file": {
-                        "name": upload_filepath.name,
-                        "mimeType": mimetypes.guess_type(upload_filepath)[0],
+                        "name": input_file.name,
+                        "mimeType": mimetypes.guess_type(input_file)[0],
                         "buffer": file.read(),
                     }
                 },
@@ -274,7 +243,7 @@ class PMHC:
             f"https://pmhc-mds.net/api/organisations/{self.phn_identifier}/uploads",
             data={
                 "uuid": uuid,
-                "filename": upload_filepath.name,
+                "filename": input_file.name,
                 "test": test,
                 "encoded_organisation_path": self.phn_identifier,
             },
@@ -283,7 +252,7 @@ class PMHC:
         logging.info(post_response)
         logging.info(post_response.text())
 
-        return upload_filename
+        return uuid
 
     def wait_for_upload(self):
         """Waits for a PMHC upload to complete processing in 'test' mode"""
@@ -300,40 +269,35 @@ class PMHC:
                 )
                 time.sleep(delay)
 
-    def download_error_json(self, upload_id: str) -> Path:
+    def download_error_json(self, uuid: str, download_folder: Path = Path(".")) -> Path:
         """Downloads a JSON error file from PMHC
         This is useful for matching against uploaded files and processing
 
         Args:
-            upload_id (str): PMHC upload_id from View Uploads page e.g. 7f91a4f5
+            uuid (str): PMHC upload uuid from View Uploads page e.g.
+                94edf5e3-36b1-46d3-9178-bf3b142da6a1
+                The uuid is found in the URL to the upload summary page.
+            download_folder (Path): Location to save the downloaded error JSON.
+                (Default: current directory)
 
         Returns:
             Path: Path to JSON file saved to local disk
         """
 
-        # first we need to get the uuid e.g. 94edf5e3-36b1-46d3-9178-bf3b142da6a1
-        id_query = self.page.request.get(
-            f"https://pmhc-mds.net/api/uploads?upload_uuid={upload_id}",
-            headers={"Range": "0-49"},
-        )
+        url = f"https://pmhc-mds.net/api/organisations/{self.phn_identifier}/uploads/{uuid}"
+        upload_errors_json = self.page.request.get(url)
 
-        id_json = id_query.json()
+        download_folder.mkdir(parents=True, exist_ok=True)
+        filename = download_folder / f"{uuid}.json"
+        with open(filename, "wb") as file:
+            file.write(upload_errors_json.body())
 
-        time.sleep(0.5)
-        for upload in id_json:
-            uuid = upload["uuid"]
-            url = f"https://pmhc-mds.net/api/organisations/{self.phn_identifier}/uploads/{uuid}"
-            upload_errors_json = self.page.request.get(url)
+        logging.info(f"Saved JSON file to disk: '{filename}'")
 
-            filename = self.downloads_folder / f"{upload_id}.json"
-            with open(filename, "wb") as file:
-                file.write(upload_errors_json.body())
+        # Remove download body from memory. Otherwise it will stay in
+        # memory so long as the PMHC class is in use.
+        upload_errors_json.dispose()
 
-            logging.info(f"Saved JSON file to disk: '{filename}'")
-
-        # return whatever json file it last found to calling script
-        # We'll need to make this more robust in the near future if
-        # we start getting multiple files coming back
         return filename
 
     def is_upload_processing(self) -> bool:
@@ -357,48 +321,9 @@ class PMHC:
         # all ok, none are processing, we are free to now upload a new file
         return False
 
-    def find_upload_id(self, pmhc_filename: str) -> str:
-        """Uses the PMHC backend to get upload_id from filter results
-
-        Args:
-            pmhc_filename (str): PMHC filename to search for
-            e.g. round_5_PMHC_MDS_20200708_20200731_1686871871.zip
-
-        Returns:
-            str: upload id e.g. 11ef7dcf
-        """
-        pmhc_username = self.user_info["username"]
-
-        # this search should return exactly one result
-        filter_page = f"https://pmhc-mds.net/api/uploads?filename={pmhc_filename}&username={pmhc_username}&test=1&sort=-date"
-        filter_json = self.page.request.get(filter_page).json()
-
-        num_filter_json_results = len(filter_json)
-        if num_filter_json_results != 1:
-            raise CouldNotFindPmhcUpload(
-                f"Expected 1 filter search result - received {num_filter_json_results}"
-            )
-
-        uuid = filter_json[0]["uuid"]
-
-        # the first 8 chars of the uuid is the upload_id
-        self.upload_id = uuid[:8]
-
-        self.upload_link = (
-            f"https://pmhc-mds.net/#/upload/details/{uuid}/{self.phn_identifier}"
-        )
-
-        self.upload_status = filter_json[0]["status"]
-        if self.upload_status == "complete":
-            self.complete = True
-        else:
-            self.complete = False
-
-        return self.upload_id
-
     def download_pmhc_mds(
         self,
-        output_directory: Optional[Path] = None,
+        output_directory: Path = Path("."),
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
         organisation_path: Optional[str] = None,
@@ -409,11 +334,11 @@ class PMHC:
         """Extract PMHC MDS Data within the date range. If no date range is given,
         start_date defaults to 01/01/2016 and end_date defaults to the current date.
 
-        Output file is saved to output_directory. (self.downloads_folder by default)
+        Output file is saved to output_directory. (current directory by default)
 
         Args:
             output_directory: directory to save download (defaults to
-                "downloads" folder in current directory)
+                current directory)
             start_date: start date for extract (default: 2016-01-01)
             end_date: end date for extract (default: today)
             organisation_path: PHN identifier defined when parent class is
@@ -431,8 +356,6 @@ class PMHC:
             Path to downloaded extract.
         """
 
-        if output_directory is None:
-            output_directory = self.downloads_folder
         if start_date is None:
             start_date = date(2016, 1, 1)
         if end_date is None:
@@ -486,5 +409,9 @@ class PMHC:
             logging.info(f"Saving output to {output_file}")
             with open(output_file, "wb") as fp:
                 fp.write(download.body())
+
+            # Remove download body from memory. Otherwise it will stay
+            # in memory so long as the PMHC class is in use.
+            download.dispose()
 
             return output_file
