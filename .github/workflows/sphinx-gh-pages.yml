@@ -36,7 +36,7 @@ jobs:
       - name: Build with Sphinx
         run: |
             poetry install
-            poetry shell
+            source $(poetry env info --path)/bin/activate
             cd docs
             make html
       - name: Upload artifact
