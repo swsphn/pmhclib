@@ -44,7 +44,7 @@ class CouldNotFindPmhcUpload(Exception):
 
 
 class SecureString(str):
-    """Show *** instead of string value in tracebacks"""
+    """Show `'***'` instead of string value in tracebacks"""
 
     def __repr__(self):
         return "***"
@@ -52,6 +52,8 @@ class SecureString(str):
 
 @dataclass
 class PMHCSpecificationRepresentation:
+    """Dataclass which provides structure for PMHCSpecification Enum."""
+
     term: str
     filter_term: str
 
@@ -67,24 +69,28 @@ class PMHCSpecification(PMHCSpecificationRepresentation, Enum):
 
 
 class PMHC:
-    """This class wraps the unofficial PMHC API. Use it to automate
-    tasks such as uploading to the PMHC website, downloading error
-    reports, downloading PMHC extracts, etc.
+    """This class wraps the unofficial PMHC API.
+
+    Use it to automate tasks such as uploading to the PMHC website,
+    downloading error reports, downloading PMHC extracts, etc.
 
     Usage:
 
-    This class is intended to be used as a context manager. This ensures
+    This class is intended to be used with a context manager. This ensures
     that the playwright browser context is correctly closed. For
     example:
 
     >>> with PMHC() as pmhc:
     ...     pmhc.login()
-    ...     pmhc.download_error_json('7f91a4f5')
+    ...     pmhc.download_error_json('94edf5e3-36b1-46d3-9178-bf3b142da6a1')
 
+    :param headless: Use headless browser
     """
 
     def __enter__(self):
-        # Initialise playwright without a context manager
+        """Initialise playwright. (Called automatically by context
+        manager.)
+        """
         self.p = sync_playwright().start()
         self.browser = self.p.chromium.launch(headless=self.headless)
         self.context = self.browser.new_context()
@@ -93,6 +99,9 @@ class PMHC:
         return self  # Return the instance of this class
 
     def __exit__(self, exc_type, exc_value, traceback):
+        """Shutdown playwright. (Called automatically when context
+        manager exits.)
+        """
         # exc_type, exc_value, and traceback are required parameters in __exit__()
         self.browser.close()
         self.p.stop()
@@ -108,7 +117,7 @@ class PMHC:
 
     def login(self):
         """Logs in to PMHC website. This allows us to reuse the login the session
-        across other class methods
+        across other class methods.
         """
 
         # Prompt user for credentials if not set in env.
@@ -176,20 +185,16 @@ class PMHC:
         input_file: Path,
         test: bool = True,
     ) -> Path:
-        """Uploads a user specified file to PMHC website
+        """Uploads a user specified file to PMHC website.
 
-        Args:
-            input_file (Path): path to the file e.g. 'cc9dd7b5.csv'
-                e.g. 'PMHC_MDS_20230101_20230131.xlsx'
-            test (bool): Upload in 'test' or 'live' mode? Defaults to True ('test').
-                Use False ('live') with care!
+        :param input_file: Path to the file e.g. `'cc9dd7b5.csv'`
+            e.g. `'PMHC_MDS_20230101_20230131.xlsx'`
+        :param test: Upload in 'test' or 'live' mode? Defaults to `True`
+            ('test'). Use `False` ('live') with care!
 
-        Raises:
-            IncorrectFileType: If user uploads a bad filetype
-            FileNotFoundException: If we cannot find user file
-
-        Returns:
-            Path: filename of the new file we generated for matching purposes
+        :raise IncorrectFileType: If user uploads a bad filetype
+        :raise FileNotFoundException: If we cannot find user file
+        :return: Filename of the new file we generated for matching purposes
         """
 
         # check file looks ok
@@ -273,15 +278,13 @@ class PMHC:
         """Downloads a JSON error file from PMHC
         This is useful for matching against uploaded files and processing
 
-        Args:
-            uuid (str): PMHC upload uuid from View Uploads page e.g.
-                94edf5e3-36b1-46d3-9178-bf3b142da6a1
-                The uuid is found in the URL to the upload summary page.
-            download_folder (Path): Location to save the downloaded error JSON.
-                (Default: current directory)
+        :param uuid: PMHC upload uuid from View Uploads page. For
+            example: `'94edf5e3-36b1-46d3-9178-bf3b142da6a1'`.
+            The uuid is found in the URL to the upload summary page.
+        :param download_folder: Location to save the downloaded error
+            JSON.
 
-        Returns:
-            Path: Path to JSON file saved to local disk
+        :return: Path to JSON file saved to local disk
         """
 
         url = f"https://pmhc-mds.net/api/organisations/{self.phn_identifier}/uploads/{uuid}"
@@ -301,11 +304,11 @@ class PMHC:
         return filename
 
     def is_upload_processing(self) -> bool:
-        """Checks if the user has an upload currently 'processing' in either live or
+        """Checks if the user has an upload currently processing in either live or
         test mode. Useful for checking before we do certain actions e.g. try upload
         another file, because this script can only handle one 'processing' file at a time
-        Returns:
-            bool: True if an upload is currently processing
+
+        :return: `True` if an upload is currently processing, otherwise `False`.
         """
         # Get a list of all this user's 'test' uploads ('processing', 'complete'
         # and 'error' status)
@@ -324,42 +327,33 @@ class PMHC:
     def download_pmhc_mds(
         self,
         output_directory: Path = Path("."),
-        start_date: Optional[date] = None,
-        end_date: Optional[date] = None,
+        start_date: date = date(2016, 1, 1),
+        end_date: date = date.today(),
         organisation_path: Optional[str] = None,
         specification: PMHCSpecification = PMHCSpecification.ALL,
         without_associated_dates: bool = True,
         matched_episodes: bool = True,
     ) -> Path:
-        """Extract PMHC MDS Data within the date range. If no date range is given,
-        start_date defaults to 01/01/2016 and end_date defaults to the current date.
+        """Extract PMHC MDS Data within the date range. If no date range
+        is given, `start_date` defaults to `2016-01-01` and `end_date`
+        defaults to the current date.
 
-        Output file is saved to output_directory. (current directory by default)
+        :param output_directory: directory to save download
+        :param start_date: start date for extract
+        :param end_date: end date for extract (default: today)
+        :param organisation_path: PHN identifier (default: inherited
+            from parent class.)
+        :param specification: Specification for extract. (default:
+            `PMHCSpecification.ALL`, which returns data from all
+            specifications
+        :param without_associated_dates: Enable extract option
+            "Include data without associated dates"
+        :param matched_episodes: Enable extract option
+            "Include all data associated with matched episodes"
 
-        Args:
-            output_directory: directory to save download (defaults to
-                current directory)
-            start_date: start date for extract (default: 2016-01-01)
-            end_date: end date for extract (default: today)
-            organisation_path: PHN identifier defined when parent class is
-                initialised.
-            specification: Specification for extract. (default:
-                PMHCSpecification.ALL, which returns data from all
-                specifications
-            without_associated_dates: Enable extract option
-                "Include data without associated dates" (default: True)
-            matched_episodes: Enable extract option
-                "Include all data associated with matched episodes"
-                (default: True)
-
-        Returns:
-            Path to downloaded extract.
+        :return: Path to downloaded extract.
         """
 
-        if start_date is None:
-            start_date = date(2016, 1, 1)
-        if end_date is None:
-            end_date = date.today()
         if organisation_path is None:
             organisation_path = self.phn_identifier
 
