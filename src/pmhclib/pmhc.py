@@ -77,7 +77,7 @@ class PMHC:
     Usage:
 
     This class is intended to be used with a context manager. This ensures
-    that the playwright browser context is correctly closed. For
+    that the Playwright browser context is correctly closed. For
     example:
 
     >>> with PMHC() as pmhc:
