@@ -15,6 +15,8 @@ playwright = ">=1.40.0"
 
 [tool.poetry.group.dev.dependencies]
 sphinx = ">=7.0.0"
+myst-parser = "^2.0.0"
+sphinx-autoapi = "^3.0.0"
 
 [build-system]
 requires = ["poetry-core"]
