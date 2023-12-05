@@ -35,7 +35,7 @@ jobs:
         run: pipx install poetry 
       - name: Build with Sphinx
         run: |
-            poetry install
+            poetry install --only docs
             source $(poetry env info --path)/bin/activate
             cd docs
             make html
