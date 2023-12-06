@@ -325,7 +325,7 @@ class PMHC:
         start_date: date = date.today() - timedelta(days=30),
         end_date: date = date.today(),
         organisation_path: Optional[str] = None,
-        specification: PMHCSpecification = PMHCSpecification.ALL,
+        specification: PMHCSpecification = PMHCSpecification.PMHC,
         without_associated_dates: bool = True,
         matched_episodes: bool = True,
     ) -> Path:
@@ -340,8 +340,8 @@ class PMHC:
             organisation_path: PHN identifier (default: inherited
                 from parent class.)
             specification: Specification for extract. (default:
-                `PMHCSpecification.ALL`, which returns data from all
-                specifications.)
+                `PMHCSpecification.PMHC`, which returns data from the
+                PMHC 4.0 specification.)
             without_associated_dates: Enable extract option
                 "Include data without associated dates"
             matched_episodes: Enable extract option
