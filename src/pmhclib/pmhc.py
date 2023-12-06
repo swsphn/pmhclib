@@ -84,7 +84,8 @@ class PMHC:
     ...     pmhc.login()
     ...     pmhc.download_error_json('94edf5e3-36b1-46d3-9178-bf3b142da6a1')
 
-    :param headless: Use headless browser
+    Args:
+        headless: Use headless browser
     """
 
     def __enter__(self):
@@ -174,14 +175,18 @@ class PMHC:
     ) -> Path:
         """Uploads a user specified file to PMHC website.
 
-        :param input_file: Path to the file e.g. `'cc9dd7b5.csv'`
-            e.g. `'PMHC_MDS_20230101_20230131.xlsx'`
-        :param test: Upload in 'test' or 'live' mode? Defaults to `True`
-            ('test'). Use `False` ('live') with care!
+        Args:
+            input_file: Path to the file e.g. `'cc9dd7b5.csv'`
+                e.g. `'PMHC_MDS_20230101_20230131.xlsx'`
+            test: Upload in 'test' or 'live' mode? Defaults to `True`
+                ('test'). Use `False` ('live') with care!
 
-        :raise IncorrectFileType: If user uploads a bad filetype
-        :raise FileNotFoundException: If we cannot find user file
-        :return: Filename of the new file we generated for matching purposes
+        Raises:
+            IncorrectFileType: If user uploads a bad filetype
+            FileNotFoundException: If we cannot find user file
+
+        Returns:
+            Filename of the new file we generated for matching purposes
         """
 
         # check file looks ok
@@ -265,13 +270,15 @@ class PMHC:
         """Downloads a JSON error file from PMHC
         This is useful for matching against uploaded files and processing
 
-        :param uuid: PMHC upload uuid from View Uploads page. For
-            example: `'94edf5e3-36b1-46d3-9178-bf3b142da6a1'`.
-            The uuid is found in the URL to the upload summary page.
-        :param download_folder: Location to save the downloaded error
-            JSON.
+        Args:
+            uuid: PMHC upload uuid from View Uploads page. For
+                example: `'94edf5e3-36b1-46d3-9178-bf3b142da6a1'`.
+                The uuid is found in the URL to the upload summary page.
+            download_folder: Location to save the downloaded error
+                JSON.
 
-        :return: Path to JSON file saved to local disk
+        Returns:
+            Path to JSON file saved to local disk
         """
 
         url = f"https://pmhc-mds.net/api/organisations/{self.phn_identifier}/uploads/{uuid}"
@@ -295,7 +302,8 @@ class PMHC:
         test mode. Useful for checking before we do certain actions e.g. try upload
         another file, because this script can only handle one 'processing' file at a time
 
-        :return: `True` if an upload is currently processing, otherwise `False`.
+        Returns:
+            `True` if an upload is currently processing, otherwise `False`.
         """
         # Get a list of all this user's 'test' uploads ('processing', 'complete'
         # and 'error' status)
@@ -325,20 +333,22 @@ class PMHC:
         is given, `start_date` defaults to 30 days before the current
         date and `end_date` defaults to the current date.
 
-        :param output_directory: directory to save download
-        :param start_date: start date for extract
-        :param end_date: end date for extract (default: today)
-        :param organisation_path: PHN identifier (default: inherited
-            from parent class.)
-        :param specification: Specification for extract. (default:
-            `PMHCSpecification.ALL`, which returns data from all
-            specifications
-        :param without_associated_dates: Enable extract option
-            "Include data without associated dates"
-        :param matched_episodes: Enable extract option
-            "Include all data associated with matched episodes"
+        Args:
+            output_directory: directory to save download
+            start_date: start date for extract
+            end_date: end date for extract (default: today)
+            organisation_path: PHN identifier (default: inherited
+                from parent class.)
+            specification: Specification for extract. (default:
+                `PMHCSpecification.ALL`, which returns data from all
+                specifications.)
+            without_associated_dates: Enable extract option
+                "Include data without associated dates"
+            matched_episodes: Enable extract option
+                "Include all data associated with matched episodes"
 
-        :return: Path to downloaded extract.
+        Returns:
+            Path to downloaded extract.
         """
 
         if organisation_path is None:
