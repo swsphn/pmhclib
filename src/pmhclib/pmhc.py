@@ -118,6 +118,11 @@ class PMHC:
     def login(self):
         """Logs in to PMHC website. This allows us to reuse the login the session
         across other class methods.
+
+        Set the following environment variables to skip interactive login prompt:
+
+        - `PMHC_USERNAME`
+        - `PMHC_PASSWORD`
         """
 
         # Prompt user for credentials if not set in env.
@@ -125,24 +130,6 @@ class PMHC:
         password = SecureString(os.getenv("PMHC_PASSWORD") or "")
 
         while not username:
-            if platform.system() == "Windows":
-                logging.debug(
-                    "In future, consider setting the following environment variables "
-                    "when running this script:\n"
-                    "PMHC_USERNAME and PMHC_PASSWORD\n"
-                    "To do so, run the following commands in PowerShell:\n"
-                    "$env:PMHC_USERNAME='your_username_here'\n"
-                    "$env:PMHC_PASSWORD=python -c 'import getpass; print(getpass.getpass())'"
-                )
-            elif platform.system() == "Linux":
-                logging.debug(
-                    "In future, consider setting the following environment variables "
-                    "when running this script:\n"
-                    "PMHC_USERNAME and PMHC_PASSWORD\n"
-                    "To do so, run the following commands in Linux:\n"
-                    "read PMHC_USERNAME && export PMHC_USERNAME\n"
-                    "read -rs PMHC_PASSWORD && export PMHC_PASSWORD"
-                )
             username = input("Enter PMHC username: ")
 
         while not password:
