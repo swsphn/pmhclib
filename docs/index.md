@@ -6,5 +6,6 @@
 :hidden:
 
 autoapi/index
+GitHub <https://github.com/swsphn/pmhclib>
 ```
 
