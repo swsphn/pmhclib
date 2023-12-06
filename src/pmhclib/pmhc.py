@@ -17,7 +17,7 @@ import platform
 import shutil
 import time
 from dataclasses import dataclass
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from enum import Enum, unique
 from getpass import getpass
 from pathlib import Path
@@ -314,7 +314,7 @@ class PMHC:
     def download_pmhc_mds(
         self,
         output_directory: Path = Path("."),
-        start_date: date = date(2016, 1, 1),
+        start_date: date = date.today() - timedelta(days=30),
         end_date: date = date.today(),
         organisation_path: Optional[str] = None,
         specification: PMHCSpecification = PMHCSpecification.ALL,
@@ -322,8 +322,8 @@ class PMHC:
         matched_episodes: bool = True,
     ) -> Path:
         """Extract PMHC MDS Data within the date range. If no date range
-        is given, `start_date` defaults to `2016-01-01` and `end_date`
-        defaults to the current date.
+        is given, `start_date` defaults to 30 days before the current
+        date and `end_date` defaults to the current date.
 
         :param output_directory: directory to save download
         :param start_date: start date for extract
