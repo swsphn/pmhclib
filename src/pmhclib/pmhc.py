@@ -326,8 +326,8 @@ class PMHC:
         end_date: date = date.today(),
         organisation_path: Optional[str] = None,
         specification: PMHCSpecification = PMHCSpecification.PMHC,
-        without_associated_dates: bool = True,
-        matched_episodes: bool = True,
+        without_associated_dates: bool = False,
+        matched_episodes: bool = False,
     ) -> Path:
         """Extract PMHC MDS Data within the date range. If no date range
         is given, `start_date` defaults to 30 days before the current
