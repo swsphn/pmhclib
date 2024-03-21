@@ -81,11 +81,14 @@ class PMHC:
     that the Playwright browser context is correctly closed. For
     example:
 
-    >>> with PMHC() as pmhc:
+    >>> with PMHC('PHN105') as pmhc:
     ...     pmhc.login()
     ...     pmhc.download_error_json('94edf5e3-36b1-46d3-9178-bf3b142da6a1')
 
     Args:
+        organisation_path: Your organisation's PMHC organisation_path
+
+    Keyword Args:
         headless: Use headless browser
     """
 
@@ -108,11 +111,11 @@ class PMHC:
         self.browser.close()
         self.p.stop()
 
-    def __init__(self, headless: bool = True):
+    def __init__(self, organisation_path: str, headless: bool = True):
         # user_info is set by login()
         self.user_info = None
         self.default_timeout = 60000
-        self.phn_identifier = "PHN105"
+        self.organisation_path = organisation_path
 
         # save whether to use a headless browser instance or not
         self.headless = headless
@@ -238,12 +241,12 @@ class PMHC:
         # Second POST the upload details
         # This is required to register the upload with the PMHC portal
         post_response = self.page.request.post(
-            f"https://pmhc-mds.net/api/organisations/{self.phn_identifier}/uploads",
+            f"https://pmhc-mds.net/api/organisations/{self.organisation_path}/uploads",
             data={
                 "uuid": uuid,
                 "filename": input_file.name,
                 "test": test,
-                "encoded_organisation_path": self.phn_identifier,
+                "encoded_organisation_path": self.organisation_path,
             },
         )
         logging.info("Upload details POST response:")
@@ -282,7 +285,7 @@ class PMHC:
             Path to JSON file saved to local disk
         """
 
-        url = f"https://pmhc-mds.net/api/organisations/{self.phn_identifier}/uploads/{uuid}"
+        url = f"https://pmhc-mds.net/api/organisations/{self.organisation_path}/uploads/{uuid}"
         upload_errors_json = self.page.request.get(url)
 
         download_folder.mkdir(parents=True, exist_ok=True)
@@ -339,8 +342,12 @@ class PMHC:
             output_directory: directory to save download
             start_date: start date for extract
             end_date: end date for extract (default: today)
-            organisation_path: PHN identifier (default: inherited
-                from parent class.)
+            organisation_path: Organisation path for downloaded extract.
+                Defaults to your organisation as specified when
+                initialising `pmhclib.PMHC`. However, can be a different
+                organisation, for example if you are a PHN, but only
+                want to download data for a single provider
+                organisation.
             specification: Specification for extract. (default:
                 `PMHCSpecification.PMHC`, which returns data from the
                 PMHC 4.0 specification.)
@@ -356,7 +363,7 @@ class PMHC:
         """
 
         if organisation_path is None:
-            organisation_path = self.phn_identifier
+            organisation_path = self.organisation_path
 
         # Wait for queued download to be processed
         with Progress(*Progress.get_default_columns(), TimeElapsedColumn()) as progress:
@@ -381,7 +388,17 @@ class PMHC:
                 params=params,
             )
             download_response = download_request.json()
-            download_uuid = download_response["uuid"]
+            try:
+                download_uuid = download_response["uuid"]
+            except KeyError as err:
+                progress.stop()
+                logging.error("Could not find uuid in the following JSON:")
+                logging.error(download_response)
+                logging.error(
+                    "Ensure your PMHC user has the 'Reporting' role and you have\n"
+                    "set the correct organisation_path."
+                )
+                raise err
 
             progress.update(extract_task, description="Waiting for extract...")
             # We know the URL which will give us the final download URL,

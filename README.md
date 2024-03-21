@@ -38,7 +38,7 @@ use pattern is as follows:
 
 ``` python
 from pmhclib import PMHC
-with PMHC() as pmhc:
+with PMHC('PHN105') as pmhc:
     pmhc.login()
     ...
     # other pmhc methods.
