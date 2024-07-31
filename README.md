@@ -105,4 +105,4 @@ The generated documentation can be viewed at `docs/_build/html/index.html`.
 
 [Playwright]: https://playwright.dev/python/
 [Sphinx]: https://www.sphinx-doc.org/
-[docs]: https://reimagined-doodle-o4zv319.pages.github.io/
+[docs]: https://swsphn.github.io/pmhclib/
