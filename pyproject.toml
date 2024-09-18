@@ -9,15 +9,15 @@ authors = [
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = ">=3.8"
-rich = ">=13.7.0"
-playwright = ">=1.40.0"
+python = "^3.8"
+rich = "^13.7.0"
+playwright = "^1.40.0"
 
 [tool.poetry.group.docs.dependencies]
-sphinx = ">=7.0.0"
-myst-parser = ">=2.0.0"
-sphinx-autoapi = ">=3.0.0"
-sphinx-rtd-theme = ">=2.0.0"
+sphinx = "^7.0.0"
+myst-parser = "^2.0.0"
+sphinx-autoapi = "^3.0.0"
+sphinx-rtd-theme = "^2.0.0"
 
 [build-system]
 requires = ["poetry-core"]
