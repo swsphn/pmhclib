@@ -1,15 +1,17 @@
-# This class interacts with the PMHC website, tracking uploads and
-# their corresponding error JSON files.
-# The script uses Python Playwright to do this
-# This script is useful when doing multiple error removal runs with
-# Tested under Ubuntu WSL and PowerShell.
-# --no-headless runs best under PowerShell (it's slower under Ubuntu WSL)
-#
-# No login details are saved anywhere
-# To speed up usage when doing repeated calls, create the following local env variables:
-# PMHC_USERNAME
-# PMHC_PASSWORD
-#
+"""
+This class provides a wrapper around the unofficial PMHC internal API.
+It is useful for automating uploads and downloads from the PMHC portal.
+
+The script uses Python Playwright to do this
+Tested under Ubuntu WSL and PowerShell.
+--no-headless runs best under PowerShell (it's slower under Ubuntu WSL)
+
+No login details are saved anywhere
+To speed up usage when doing repeated calls, create the following local env variables:
+PMHC_USERNAME
+PMHC_PASSWORD
+"""
+
 import logging
 import mimetypes
 import os
@@ -329,6 +331,72 @@ class PMHC:
         # all ok, none are processing, we are free to now upload a new file
         return False
 
+    def wait_for_extract(self, uuid: str, max_retries: int) -> bool:
+        """Wait for an extract with given uuid to have status
+        'Completed'.
+
+        Both PMHC server errors and incomplete processing extracts
+        return the same HTTP status (400) and JSON response when
+        trying to fetch the extract by UUID:
+        https://pmhc-mds.net/api/extract/{download_uuid}/fetch
+        {
+          "errors": {
+            "export_fetch": "Can not fetch extract for uuid
+                [123...]. Extract is not complete. Extract has
+                expired."
+          }
+        }
+        
+        For this reason, it's not sufficient to simply try the
+        download URL until we get a success code. If there is
+        a PMHC server error, we will end up retrying forever.
+        
+        Instead, we need to fetch the list of extracts and filter
+        for one with the required uuid. We can then check the
+        extract status explicitly, which should be one of the
+        following values:
+        
+        - Completed
+        - Processing
+        - Queued
+        - Error
+        
+        If Completed, we can download the extract.
+        If Processing or Queued, keep looping and waiting.
+        If Error, the extract has failed. Exit.
+        """
+        retries = 0
+        while retries <= max_retries:
+            time.sleep(30)
+            try:
+                extracts_request = self.page.request.get(
+                    "https://pmhc-mds.net/api/extract?sort=-date"
+                )
+            except playwright.sync_api.Error as err:
+                if "Request timed out" in err.message:
+                    retries += 1
+                    logging.warning(
+                        f"Request timed out ({retries} of {max_retries}). Retrying."
+                    )
+                else:
+                    raise err
+
+            extracts = extracts_request.json()
+            extract = next(filter(lambda item: item.get("uuid") == uuid, extracts))
+            status = extract["status"]
+
+            if status == "Completed":
+                break
+            if status == "Error":
+                logging.error(f"PMHC extract with uuid {uuid} has failed.")
+                logging.error("See PMHC Server error:")
+                logging.error(extract["stash"]["error"])
+                raise PmhcServerError("The PMHC extract has failed on the server.")
+        else:
+            raise MaxRetriesExceeded(
+                f"Tried fetching PMHC extract list {retries - 1} times"
+            )
+
     def download_pmhc_mds(
         self,
         output_directory: Path = Path("."),
@@ -407,84 +475,21 @@ class PMHC:
                 )
                 raise err
 
-            # Both PMHC server errors and incomplete processing extracts
-            # return the same HTTP status (400) and JSON response when
-            # trying to fetch the extract by UUID:
-            # https://pmhc-mds.net/api/extract/{download_uuid}/fetch
-            # {
-            #   "errors": {
-            #     "export_fetch": "Can not fetch extract for uuid
-            #         [123...]. Extract is not complete. Extract has
-            #         expired."
-            #   }
-            # }
-            #
-            # For this reason, it's not sufficient to simply try the
-            # download URL until we get a success code. If there is
-            # a PMHC server error, we will end up retrying forever.
-            #
-            # Instead, we need to fetch the list of extracts and filter
-            # for one with the required uuid. We can then check the
-            # extract status explicitly, which should be one of the
-            # following values:
-            #
-            # - Completed
-            # - Processing
-            # - Queued
-            # - Error
-            #
-            # If Completed, we can download the extract.
-            # If Processing or Queued, keep looping and waiting.
-            # If Error, the extract has failed. Exit.
-
             # Wait for extract to be ready
             progress.update(extract_task, description="Waiting for extract...")
-            retries = 0
-            while retries <= max_retries:
-                time.sleep(30)
-                try:
-                    extracts_request = self.page.request.get(
-                        "https://pmhc-mds.net/api/extract?sort=-date"
-                    )
-                except playwright.sync_api.Error as err:
-                    if "Request timed out" in err.message:
-                        retries += 1
-                        logging.warning(
-                            f"Request timed out ({retries} of {max_retries}). Retrying."
-                        )
-                    else:
-                        raise err
-
-                extracts = extracts_request.json()
-                extract = next(
-                    filter(lambda item: item.get("uuid") == download_uuid, extracts)
-                )
-                status = extract["status"]
-
-                if status == "Completed":
-                    break
-                elif status == "Error":
-                    logging.error(f"PMHC extract with uuid {download_uuid} has failed.")
-                    logging.error("See PMHC Server error:")
-                    logging.error(extract["stash"]["error"])
-                    raise PmhcServerError("The PMHC extract has failed on the server.")
-            else:
-                raise MaxRetriesExceeded(
-                    f"Tried fetching PMHC extract list {retries - 1} times"
-                )
+            self.wait_for_extract(download_uuid, max_retries)
 
             # We know the URL which will give us the final download URL,
             # as we have the uuid. We have confirmed above that the
             # extract is completed.
-            request_ok = False
             retries = 0
-            while not request_ok and retries <= max_retries:
-                time.sleep(30)
+            while retries <= max_retries:
                 try:
                     download_url_request = self.page.request.get(
                         f"https://pmhc-mds.net/api/extract/{download_uuid}/fetch"
                     )
-                    request_ok = download_url_request.ok
+                    if download_url_request.ok:
+                        break
                 except playwright.sync_api.Error as err:
                     if "Request timed out" in err.message:
                         retries += 1
@@ -494,7 +499,10 @@ class PMHC:
                     else:
                         raise err
 
-            if retries > max_retries:
+                # Wait before retrying
+                time.sleep(30)
+
+            else:
                 raise MaxRetriesExceeded(
                     f"Tried fetching PMHC extract {retries - 1} times."
                 )
