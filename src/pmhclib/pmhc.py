@@ -338,7 +338,9 @@ class PMHC:
         Both PMHC server errors and incomplete processing extracts
         return the same HTTP status (400) and JSON response when
         trying to fetch the extract by UUID:
+
         https://pmhc-mds.net/api/extract/{download_uuid}/fetch
+
         {
           "errors": {
             "export_fetch": "Can not fetch extract for uuid
