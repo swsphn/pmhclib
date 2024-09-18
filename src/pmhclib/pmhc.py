@@ -339,16 +339,18 @@ class PMHC:
         return the same HTTP status (400) and JSON response when
         trying to fetch the extract by UUID:
 
-        https://pmhc-mds.net/api/extract/{download_uuid}/fetch
+        .. code-block:: text
 
-        {
-          "errors": {
-            "export_fetch": "Can not fetch extract for uuid
-                [123...]. Extract is not complete. Extract has
-                expired."
-          }
-        }
-        
+            https://pmhc-mds.net/api/extract/{download_uuid}/fetch
+
+            {
+              "errors": {
+                "export_fetch": "Can not fetch extract for uuid
+                    [123...]. Extract is not complete. Extract has
+                    expired."
+              }
+            }
+
         For this reason, it's not sufficient to simply try the
         download URL until we get a success code. If there is
         a PMHC server error, we will end up retrying forever.
