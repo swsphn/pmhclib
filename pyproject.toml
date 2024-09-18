@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "pmhclib"
-version = "0.6.0"
+version = "0.6.1"
 description = "Python wrapper for unofficial PMHC MDS portal API"
 authors = [
     "David Wales <david.wales@swsphn.com.au>",
