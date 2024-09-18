@@ -44,6 +44,14 @@ class CouldNotFindPmhcUpload(Exception):
     """Custom error handler for when an upload cannot be found on PMHC"""
 
 
+class PmhcServerError(Exception):
+    """Custom exception for when a PMHC Server error is encountered"""
+
+
+class MaxRetriesExceeded(Exception):
+    """Custom exception for when the maximum retries is exceeded"""
+
+
 class SecureString(str):
     """Show `'***'` instead of string value in tracebacks"""
 
@@ -383,6 +391,7 @@ class PMHC:
                 "all_episode_children": int(matched_episodes),
                 "spec_type": specification.term,
             }
+
             download_request = self.page.request.get(
                 "https://pmhc-mds.net/api/extract/csv",
                 params=params,
@@ -400,10 +409,75 @@ class PMHC:
                 )
                 raise err
 
+            # Both PMHC server errors and incomplete processing extracts
+            # return the same HTTP status (400) and JSON response when
+            # trying to fetch the extract by UUID:
+            # https://pmhc-mds.net/api/extract/{download_uuid}/fetch
+            # {
+            #   "errors": {
+            #     "export_fetch": "Can not fetch extract for uuid
+            #         [123...]. Extract is not complete. Extract has
+            #         expired."
+            #   }
+            # }
+            #
+            # For this reason, it's not sufficient to simply try the
+            # download URL until we get a success code. If there is
+            # a PMHC server error, we will end up retrying forever.
+            #
+            # Instead, we need to fetch the list of extracts and filter
+            # for one with the required uuid. We can then check the
+            # extract status explicitly, which should be one of the
+            # following values:
+            #
+            # - Completed
+            # - Processing
+            # - Queued
+            # - Error
+            #
+            # If Completed, we can download the extract.
+            # If Processing or Queued, keep looping and waiting.
+            # If Error, the extract has failed. Exit.
+
+            # Wait for extract to be ready
             progress.update(extract_task, description="Waiting for extract...")
+            retries = 0
+            while retries <= max_retries:
+                time.sleep(30)
+                try:
+                    extracts_request = self.page.request.get(
+                        "https://pmhc-mds.net/api/extract?sort=-date"
+                    )
+                except playwright.sync_api.Error as err:
+                    if "Request timed out" in err.message:
+                        retries += 1
+                        logging.warning(
+                            f"Request timed out ({retries} of {max_retries}). Retrying."
+                        )
+                    else:
+                        raise err
+
+                extracts = extracts_request.json()
+                extract = next(
+                    filter(lambda item: item.get("uuid") == download_uuid, extracts)
+                )
+                status = extract["status"]
+
+                if status == "Completed":
+                    break
+                elif status == "Error":
+                    logging.error(f"PMHC extract with uuid {download_uuid} has failed.")
+                    logging.error("See PMHC Server error:")
+                    logging.error(extract["stash"]["error"])
+                    raise PmhcServerError("The PMHC extract has failed on the server.")
+            else:
+                raise MaxRetriesExceeded(
+                    f"Tried fetching PMHC extract list {retries - 1} times"
+                )
+
             # We know the URL which will give us the final download URL,
-            # as we have the uuid. However, the URL doesn't exist
-            # immediately. We loop until we get a success code.
+            # as we have the uuid. We have confirmed above that the
+            # extract is completed.
             request_ok = False
             retries = 0
             while not request_ok and retries <= max_retries:
@@ -421,6 +495,11 @@ class PMHC:
                         )
                     else:
                         raise err
+
+            if retries > max_retries:
+                raise MaxRetriesExceeded(
+                    f"Tried fetching PMHC extract {retries - 1} times."
+                )
 
             download_url_json = download_url_request.json()
             download_url = download_url_json["location"]
