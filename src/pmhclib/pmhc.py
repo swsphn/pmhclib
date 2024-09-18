@@ -13,11 +13,9 @@
 import logging
 import mimetypes
 import os
-import platform
-import shutil
 import time
 from dataclasses import dataclass
-from datetime import datetime, date, timedelta
+from datetime import date, timedelta
 from enum import Enum, unique
 from getpass import getpass
 from pathlib import Path
@@ -241,7 +239,7 @@ class PMHC:
             )
 
         upload_status = upload_response.json()
-        logging.debug(f"Upload status:")
+        logging.debug("Upload status:")
         logging.debug(upload_status)
 
         uuid = upload_status["id"]
