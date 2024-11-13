@@ -4,12 +4,15 @@ It is useful for automating uploads and downloads from the PMHC portal.
 
 The script uses Python Playwright to do this
 Tested under Ubuntu WSL and PowerShell.
---no-headless runs best under PowerShell (it's slower under Ubuntu WSL)
+headless=True runs best under PowerShell (it's slower under Ubuntu WSL)
 
 No login details are saved anywhere
 To speed up usage when doing repeated calls, create the following local env variables:
 PMHC_USERNAME
 PMHC_PASSWORD
+PMHC_TOTP_SECRET
+
+Note: See PMHC.login() documentation for details about `PMHC_TOTP_SECRET`.
 """
 
 import logging
@@ -23,6 +26,7 @@ from getpass import getpass
 from pathlib import Path
 from typing import Optional
 
+import pyotp
 import playwright.sync_api
 from playwright.sync_api import sync_playwright
 from rich.progress import Progress, TimeElapsedColumn
@@ -136,11 +140,20 @@ class PMHC:
 
         - `PMHC_USERNAME`
         - `PMHC_PASSWORD`
+        - `PMHC_TOTP_SECRET`
+
+        NOTE: `PMHC_TOTP_SECRET` is _not_ the 6 digit time-dependent TOTP code,
+        but rather the long base32 encoded random secret. You might find this in
+        the 'advanced' section when editing the record in your TOTP app. It will
+        likely be a long string containing uppercase letters and numbers. This
+        will be automatically combined with the current time to derive the
+        correct 6 digit code.
         """
 
         # Prompt user for credentials if not set in env.
         username = os.getenv("PMHC_USERNAME")
         password = SecureString(os.getenv("PMHC_PASSWORD") or "")
+        totp_secret = SecureString(os.getenv("PMHC_TOTP_SECRET") or "")
 
         while not username:
             username = input("Enter PMHC username: ")
@@ -166,8 +179,38 @@ class PMHC:
         password_field = self.page.locator('input[id="password"]')
         password_field.fill(password)
         password_field.press("Enter")
-
         self.page.wait_for_load_state()
+
+        # Note: We get the code _after_ loading the page and entering
+        # the username and password, to ensure that it is still valid
+        # when we submit it.
+        logging.info("Entering TOTP MFA code")
+        if totp_secret:
+            totp = pyotp.TOTP(totp_secret)
+            totp_code = totp.now()
+        else:
+            totp_code = None
+            while not totp_code:
+                totp_code = SecureString(
+                    getpass(
+                        "Enter six-digit MFA code (keyboard input will be hidden): "
+                    )
+                )
+
+        mfa_field = self.page.locator('input[id="code"]')
+        mfa_field.fill(totp_code)
+        mfa_field.press("Enter")
+        self.page.wait_for_load_state()
+
+        # Skip fingerprint/face recognition enrollment
+        # TODO: Only do this if we are actually on this page.
+        if self.page.url.startswith(
+            "https://login.logicly.com.au/u/mfa-webauthn-platform-enrollment"
+        ):
+            logging.info("Skipping fingerprint/face recognition enrollment")
+            skip_button = self.page.locator('button[value="refuse-add-device"]')
+            skip_button.click()
+            self.page.wait_for_load_state()
 
         # confirm login was successful
         user_query = self.page.request.get("https://pmhc-mds.net/api/current-user")
@@ -354,17 +397,17 @@ class PMHC:
         For this reason, it's not sufficient to simply try the
         download URL until we get a success code. If there is
         a PMHC server error, we will end up retrying forever.
-        
+
         Instead, we need to fetch the list of extracts and filter
         for one with the required uuid. We can then check the
         extract status explicitly, which should be one of the
         following values:
-        
+
         - Completed
         - Processing
         - Queued
         - Error
-        
+
         If Completed, we can download the extract.
         If Processing or Queued, keep looping and waiting.
         If Error, the extract has failed. Exit.

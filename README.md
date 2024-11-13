@@ -50,6 +50,7 @@ variables if they are set:
 ```
 PMHC_USERNAME
 PMHC_PASSWORD
+PMHC_TOTP_SECRET
 ```
 
 Otherwise, you will be prompted for credentials interactively.
@@ -60,6 +61,7 @@ follows:
 ``` ps1
 $env:PMHC_USERNAME='your_username_here'
 $env:PMHC_PASSWORD=python -c 'import getpass; print(getpass.getpass())'
+$env:PMHC_TOTP_SECRET=python -c 'import getpass; print(getpass.getpass("TOTP Secret: "))'
 ```
 
 In a Unix shell (Mac, Linux), you can do:
@@ -67,7 +69,16 @@ In a Unix shell (Mac, Linux), you can do:
 ``` bash
 export PMHC_USERNAME='your_username_here'
 read -rs PMHC_PASSWORD && export PMHC_PASSWORD
+read -rs PMHC_TOTP_SECRET && export PMHC_TOTP_SECRET
 ```
+
+NOTE: `PMHC_TOTP_SECRET` is the unchanging base32-encoded TOTP secret,
+not the time-based six-digit code. You can likely find this secret in
+the 'advanced' section of your TOTP app. It will be a long string of
+upper-case letters and digits. The six-digit code will be automatically
+calculated based on the current time as required if `PMHC_TOTP_SECRET`
+is specified. Otherwise, the user will be prompted to enter the current
+six-digit code.
 
 ## Documentation
 

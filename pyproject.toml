@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "pmhclib"
-version = "0.6.2"
+version = "0.7.0"
 description = "Python wrapper for unofficial PMHC MDS portal API"
 authors = [
     "David Wales <david.wales@swsphn.com.au>",
@@ -12,6 +12,7 @@ readme = "README.md"
 python = "^3.8"
 rich = "^13.7.0"
 playwright = "^1.40.0"
+pyotp = "^2.9.0"
 
 [tool.poetry.group.docs.dependencies]
 sphinx = "^7.0.0"
