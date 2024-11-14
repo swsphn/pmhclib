@@ -77,11 +77,15 @@ not the time-based six-digit code. You can likely find this secret in
 the 'advanced' section of your TOTP app. It will be a long string of
 upper-case letters and digits. See below for a list of TOTP apps which
 support viewing the TOTP secret. It is also possible to get the secret
-by scanning the setup QR code, or by clicking the button on the website
-to manually configure the TOTP app. The six-digit code will be
-automatically calculated based on the current time as required if
-`PMHC_TOTP_SECRET` is specified. Otherwise, the user will be prompted to
-enter the current six-digit code.
+by scanning the setup QR code with a generic QR code reader, or by
+clicking the _Trouble scanning_ button on the website to manually
+configure the TOTP app:
+
+![manually view totp secret](./images/view-totp-secret-at-setup.png)
+
+The six-digit code will be automatically calculated based on the current
+time as required if `PMHC_TOTP_SECRET` is specified. Otherwise, the user
+will be prompted to enter the current six-digit code.
 
 Not all TOTP apps support viewing the secret. The following are known
 to support this:
