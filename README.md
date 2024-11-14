@@ -75,10 +75,25 @@ read -rs PMHC_TOTP_SECRET && export PMHC_TOTP_SECRET
 NOTE: `PMHC_TOTP_SECRET` is the unchanging base32-encoded TOTP secret,
 not the time-based six-digit code. You can likely find this secret in
 the 'advanced' section of your TOTP app. It will be a long string of
-upper-case letters and digits. The six-digit code will be automatically
-calculated based on the current time as required if `PMHC_TOTP_SECRET`
-is specified. Otherwise, the user will be prompted to enter the current
-six-digit code.
+upper-case letters and digits. See below for a list of TOTP apps which
+support viewing the TOTP secret. It is also possible to get the secret
+by scanning the setup QR code, or by clicking the button on the website
+to manually configure the TOTP app. The six-digit code will be
+automatically calculated based on the current time as required if
+`PMHC_TOTP_SECRET` is specified. Otherwise, the user will be prompted to
+enter the current six-digit code.
+
+Not all TOTP apps support viewing the secret. The following are known
+to support this:
+
+- [Aegis Authenticator](https://getaegis.app/) (Android only)
+- [Bitwarden
+  Authenticator](https://bitwarden.com/products/authenticator/)
+- [Ente Auth](https://github.com/ente-io/ente/tree/main/auth#readme)
+- [2FA Authenticator (2FAS)](https://2fas.com/)
+
+For more details, see the [list of recommended authenticator
+apps][mfa-apps] on our Data Wiki.
 
 ## Documentation
 
@@ -117,3 +132,4 @@ The generated documentation can be viewed at `docs/_build/html/index.html`.
 [Playwright]: https://playwright.dev/python/
 [Sphinx]: https://www.sphinx-doc.org/
 [docs]: https://swsphn.github.io/pmhclib/
+[mfa-apps]: https://datawiki.swsphn.com.au/software/gui-tools/multi-factor-authentication-apps/
