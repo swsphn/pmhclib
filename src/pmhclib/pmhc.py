@@ -31,6 +31,8 @@ import playwright.sync_api
 from playwright.sync_api import sync_playwright
 from rich.progress import Progress, TimeElapsedColumn
 
+logging.basicConfig(level=logging.DEBUG)
+
 
 class FileNotFoundException(Exception):
     """Custom error handler for when no file is found"""
@@ -181,13 +183,30 @@ class PMHC:
         password_field.press("Enter")
         self.page.wait_for_load_state()
 
+        # Detect invalid username or password error
+        # If the username and password are correct, we should be
+        # redirected to /u/mfa-otp-challenge.
+        # If we are still on /u/login/password, then the username and
+        # password are probably invalid.
+        if self.page.url.startswith("https://login.logicly.com.au/u/login/password"):
+            logging.debug(f"{self.page.url=}")
+            error_message = self.page.locator(
+                'span[id="error-element-password"]'
+            ).inner_text()
+            raise InvalidPmhcUser(
+                "Did not reach expected OTP page. Error message:\n" f"{error_message}"
+            )
+
+        # Wait for MFA page to appear.
+        self.page.wait_for_url("https://login.logicly.com.au/u/mfa-otp-challenge*")
+
         # Note: We get the code _after_ loading the page and entering
         # the username and password, to ensure that it is still valid
         # when we submit it.
         logging.info("Entering TOTP MFA code")
         if totp_secret:
             totp = pyotp.TOTP(totp_secret)
-            totp_code = totp.now()
+            totp_code = SecureString(totp.now())
         else:
             totp_code = None
             while not totp_code:
