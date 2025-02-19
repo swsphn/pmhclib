@@ -31,8 +31,6 @@ import playwright.sync_api
 from playwright.sync_api import sync_playwright
 from rich.progress import Progress, TimeElapsedColumn
 
-logging.basicConfig(level=logging.DEBUG)
-
 
 class FileNotFoundException(Exception):
     """Custom error handler for when no file is found"""
