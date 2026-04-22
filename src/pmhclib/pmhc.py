@@ -75,10 +75,10 @@ class PMHCSpecificationRepresentation:
 class PMHCSpecification(PMHCSpecificationRepresentation, Enum):
     """Enum of valid PMHC specifications"""
 
-    ALL = "meta", "META 4.0"
-    PMHC = "pmhc", "PMHC 4.0"
-    HEADSPACE = "headspace", "headspace 2.0"
-    WAYBACK = "wayback", "WAYBACK 3.0"
+    ALL = "meta", "Include data from all specifications"
+    HEADSPACE = "headspace", "headspace 4.1"
+    PMHC = "pmhc", "PMHC 5.0"
+    SURVEY = "survey", "SURVEY 1.0"
 
 
 class PMHC:
@@ -488,7 +488,7 @@ class PMHC:
                 organisation.
             specification: Specification for extract. (default:
                 `PMHCSpecification.PMHC`, which returns data from the
-                PMHC 4.0 specification.)
+                current PMHC specification.)
             without_associated_dates: Enable extract option
                 "Include data without associated dates"
             matched_episodes: Enable extract option
