@@ -545,78 +545,72 @@ class PMHC:
         if organisation_path is None:
             organisation_path = self.organisation_path
 
-        # Wait for queued download to be processed
-        with Progress(*Progress.get_default_columns(), TimeElapsedColumn()) as progress:
-            extract_task = progress.add_task("Checking for PMHC extract...", total=None)
+        # Queue download from PMHC
+        logging.info("Queuing extract...")
+        params = {
+            "organisation_path": f"{organisation_path}",
+            "encoded_organisation_path": f"{organisation_path}",
+            "file_type": "csv",
+            "start_date": f"{start_date:%Y-%m-%d}",
+            "end_date": f"{end_date:%Y-%m-%d}",
+            # These need to be interpreted as a JS boolean
+            # (true or 1, rather than True).
+            "childless": int(without_associated_dates),
+            "all_episode_children": int(matched_episodes),
+            "spec_type": specification.term,
+        }
 
-            # Queue download from PMHC
-            progress.update(extract_task, description="Queuing extract...")
-            params = {
-                "organisation_path": f"{organisation_path}",
-                "encoded_organisation_path": f"{organisation_path}",
-                "file_type": "csv",
-                "start_date": f"{start_date:%Y-%m-%d}",
-                "end_date": f"{end_date:%Y-%m-%d}",
-                # These need to be interpreted as a JS boolean
-                # (true or 1, rather than True).
-                "childless": int(without_associated_dates),
-                "all_episode_children": int(matched_episodes),
-                "spec_type": specification.term,
-            }
-
-            download_request = self.s.get(
-                "https://pmhc-mds.net/api/extract/csv",
-                params=params,
+        download_request = self.s.get(
+            "https://pmhc-mds.net/api/extract/csv",
+            params=params,
+        )
+        download_response = download_request.json()
+        try:
+            download_uuid = download_response["uuid"]
+        except KeyError as err:
+            progress.stop()
+            logging.error("Could not find uuid in the following JSON:")
+            logging.error(download_response)
+            logging.error(
+                "Ensure your PMHC user has the 'Reporting' role and you have\n"
+                "set the correct organisation_path."
             )
-            download_response = download_request.json()
+            raise err
+
+        # Wait for extract to be ready
+        logging.info("Waiting for extract...")
+        self.wait_for_extract(download_uuid, max_retries)
+
+        # We know the URL which will give us the final download URL,
+        # as we have the uuid. We have confirmed above that the
+        # extract is completed.
+        retries = 0
+        while retries < max_retries:
             try:
-                download_uuid = download_response["uuid"]
-            except KeyError as err:
-                progress.stop()
-                logging.error("Could not find uuid in the following JSON:")
-                logging.error(download_response)
-                logging.error(
-                    "Ensure your PMHC user has the 'Reporting' role and you have\n"
-                    "set the correct organisation_path."
+                download_url_request = self.s.get(
+                    f"https://pmhc-mds.net/api/extract/{download_uuid}/fetch"
                 )
-                raise err
-
-            # Wait for extract to be ready
-            progress.update(extract_task, description="Waiting for extract...")
-            self.wait_for_extract(download_uuid, max_retries)
-
-            # We know the URL which will give us the final download URL,
-            # as we have the uuid. We have confirmed above that the
-            # extract is completed.
-            retries = 0
-            while retries < max_retries:
-                try:
-                    download_url_request = self.s.get(
-                        f"https://pmhc-mds.net/api/extract/{download_uuid}/fetch"
-                    )
-                    # Successful status codes are between 200 and 299
-                    if 200 <= download_url_request.status_code <= 299:
-                        break
-                except (requests.ReadTimeout, requests.ConnectionError) as err:
-                    retries += 1
-                    logging.warning(err)
-                    logging.warning(
-                        f"Request timed out ({retries} of {max_retries}). Retrying."
-                    )
-
-                # Wait before retrying
-                time.sleep(30)
-
-            else:
-                raise MaxRetriesExceeded(
-                    f"Tried fetching PMHC extract {retries} times."
+                # Successful status codes are between 200 and 299
+                if 200 <= download_url_request.status_code <= 299:
+                    break
+            except (requests.ReadTimeout, requests.ConnectionError) as err:
+                retries += 1
+                logging.warning(err)
+                logging.warning(
+                    f"Request timed out ({retries} of {max_retries}). Retrying."
                 )
 
-            download_url_json = download_url_request.json()
-            download_url = download_url_json["location"]
+            # Wait before retrying
+            time.sleep(30)
 
-            progress.update(extract_task, description="Downloading extract...")
-            return self.s.get(download_url, **kwargs)
+        else:
+            raise MaxRetriesExceeded(f"Tried fetching PMHC extract {retries} times.")
+
+        download_url_json = download_url_request.json()
+        download_url = download_url_json["location"]
+
+        logging.info("Downloading extract...")
+        return self.s.get(download_url, **kwargs)
 
     def download_pmhc_mds(
         self,
