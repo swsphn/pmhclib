@@ -124,7 +124,12 @@ class PMHC:
         self.user_info = None
         self.organisation_path = organisation_path
 
-    def login(self):
+    def login(
+        self,
+        username: str | None = None,
+        password: str | None = None,
+        totp_secret: str | None = None,
+    ):
         """Logs in to PMHC website. This allows us to reuse the login the session
         across other class methods.
 
@@ -140,15 +145,21 @@ class PMHC:
         likely be a long string containing uppercase letters and numbers. This
         will be automatically combined with the current time to derive the
         correct 6 digit code.
+
+        Args:
+            username: PMHC username
+            password: PMHC password
+            totp_secret: static base32 encoded random totp secret Used to
+                generate the 6-digit time-based totp code. See note above.
         """
 
         pmhc_auth_url = "https://pmhc-mds.net/api/auth/login"
         pmhc_login_url = "https://pmhc-mds.net/api/current-user"
 
         # Prompt user for credentials if not set in env.
-        username = os.getenv("PMHC_USERNAME")
-        password = SecureString(os.getenv("PMHC_PASSWORD") or "")
-        totp_secret = SecureString(os.getenv("PMHC_TOTP_SECRET") or "")
+        username = username or os.getenv("PMHC_USERNAME")
+        password = SecureString(password or os.getenv("PMHC_PASSWORD") or "")
+        totp_secret = SecureString(totp_secret or os.getenv("PMHC_TOTP_SECRET") or "")
 
         while not username:
             username = input("Enter PMHC username: ")
