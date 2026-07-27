@@ -20,20 +20,12 @@ poetry add pmhclib@git+https://github.com/swsphn/pmhclib.git
 
 This will install `pmhclib` as an importable Python library.
 
-NOTE: This package depends on [Playwright][] to authenticate to the PMHC
-portal. Once the package is installed, you will need to install
-a browser for Playwright to use. Make sure you are in the same Python
-environment in which you installed `pmhclib`, then run:
-
-```
-playwright install chromium
-```
 
 ## Usage
 
 `pmhclib.PMHC` is intended to be used with a context manager. This
-ensures that the web browser which performs the login process and the
-API requests is correctly shut down when the script exits. The standard
+ensures that the requests session which performs the login process and the
+API requests is correctly closed when the script exits. The standard
 use pattern is as follows:
 
 ``` python
@@ -133,7 +125,6 @@ cd docs
 
 The generated documentation can be viewed at `docs/_build/html/index.html`.
 
-[Playwright]: https://playwright.dev/python/
 [Sphinx]: https://www.sphinx-doc.org/
 [docs]: https://swsphn.github.io/pmhclib/
 [mfa-apps]: https://datawiki.swsphn.com.au/software/gui-tools/multi-factor-authentication-apps/
