@@ -2,10 +2,6 @@
 This class provides a wrapper around the unofficial PMHC internal API.
 It is useful for automating uploads and downloads from the PMHC portal.
 
-The script uses Python Playwright to do this
-Tested under Ubuntu WSL and PowerShell.
-headless=True runs best under PowerShell (it's slower under Ubuntu WSL)
-
 No login details are saved anywhere
 To speed up usage when doing repeated calls, create the following local env variables:
 PMHC_USERNAME
@@ -15,6 +11,7 @@ PMHC_TOTP_SECRET
 Note: See PMHC.login() documentation for details about `PMHC_TOTP_SECRET`.
 """
 
+import functools
 import logging
 import mimetypes
 import os
@@ -25,10 +22,11 @@ from enum import Enum, unique
 from getpass import getpass
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlsplit, parse_qs
 
 import pyotp
-import playwright.sync_api
-from playwright.sync_api import sync_playwright
+import requests
+from bs4 import BeautifulSoup
 from rich.progress import Progress, TimeElapsedColumn
 
 
@@ -90,7 +88,7 @@ class PMHC:
     Usage:
 
     This class is intended to be used with a context manager. This ensures
-    that the Playwright browser context is correctly closed. For
+    that the requests session is correctly closed. For
     example:
 
     >>> with PMHC('PHN105') as pmhc:
@@ -99,40 +97,39 @@ class PMHC:
 
     Args:
         organisation_path: Your organisation's PMHC organisation_path
-
-    Keyword Args:
-        headless: Use headless browser
     """
 
+    default_timeout = 60  # seconds
+
     def __enter__(self):
-        """Initialise playwright. (Called automatically by context
+        """Initialise requests session. (Called automatically by context
         manager.)
         """
-        self.p = sync_playwright().start()
-        self.browser = self.p.chromium.launch(headless=self.headless)
-        self.context = self.browser.new_context()
-        self.context.set_default_timeout(self.default_timeout)
-        self.page = self.context.new_page()
+        s = requests.Session()
+        # Ensure requests eventually timeout
+        # https://github.com/psf/requests/issues/2011#issuecomment-490050252
+        s.request = functools.partial(s.request, timeout=self.default_timeout)
+        self.s = s
         return self  # Return the instance of this class
 
     def __exit__(self, exc_type, exc_value, traceback):
-        """Shutdown playwright. (Called automatically when context
+        """Close requests session. (Called automatically when context
         manager exits.)
         """
         # exc_type, exc_value, and traceback are required parameters in __exit__()
-        self.browser.close()
-        self.p.stop()
+        self.s.close()
 
-    def __init__(self, organisation_path: str, headless: bool = True):
+    def __init__(self, organisation_path: str):
         # user_info is set by login()
         self.user_info = None
-        self.default_timeout = 60000
         self.organisation_path = organisation_path
 
-        # save whether to use a headless browser instance or not
-        self.headless = headless
-
-    def login(self):
+    def login(
+        self,
+        username: str | None = None,
+        password: str | None = None,
+        totp_secret: str | None = None,
+    ):
         """Logs in to PMHC website. This allows us to reuse the login the session
         across other class methods.
 
@@ -148,12 +145,21 @@ class PMHC:
         likely be a long string containing uppercase letters and numbers. This
         will be automatically combined with the current time to derive the
         correct 6 digit code.
+
+        Args:
+            username: PMHC username
+            password: PMHC password
+            totp_secret: static base32 encoded random totp secret Used to
+                generate the 6-digit time-based totp code. See note above.
         """
 
+        pmhc_auth_url = "https://pmhc-mds.net/api/auth/login"
+        pmhc_login_url = "https://pmhc-mds.net/api/current-user"
+
         # Prompt user for credentials if not set in env.
-        username = os.getenv("PMHC_USERNAME")
-        password = SecureString(os.getenv("PMHC_PASSWORD") or "")
-        totp_secret = SecureString(os.getenv("PMHC_TOTP_SECRET") or "")
+        username = username or os.getenv("PMHC_USERNAME")
+        password = SecureString(password or os.getenv("PMHC_PASSWORD") or "")
+        totp_secret = SecureString(totp_secret or os.getenv("PMHC_TOTP_SECRET") or "")
 
         while not username:
             username = input("Enter PMHC username: ")
@@ -163,40 +169,62 @@ class PMHC:
                 getpass("Enter PMHC password (keyboard input will be hidden): ")
             )
 
-        print("Logging into PMHC website")
-        self.page.goto("https://pmhc-mds.net")
-        self.page.wait_for_load_state()
-        self.page.locator('[id="loginBtn"]').click()
-        self.page.wait_for_load_state()
+        def extract_state(url: str) -> str:
+            """Extract state parameter from url query"""
+            return parse_qs(urlsplit(url).query)["state"][0]
 
-        logging.info("Entering username")
-        username_field = self.page.locator('input[id="username"]')
-        username_field.fill(username)
-        username_field.press("Enter")
-        self.page.wait_for_load_state()
+        initial_request = self.s.get(pmhc_auth_url)
 
-        logging.info("Entering password")
-        password_field = self.page.locator('input[id="password"]')
-        password_field.fill(password)
-        password_field.press("Enter")
-        self.page.wait_for_load_state()
+        # After redirects, the URL needed for the next POST is initial_request.url
+        identifier_url = initial_request.url
+        identifier_request = self.s.post(
+            identifier_url,
+            data={
+                "state": extract_state(identifier_url),
+                "username": username,
+            },
+        )
+
+        password_url = identifier_request.url
+        password_request = self.s.post(
+            password_url,
+            data={
+                "state": extract_state(password_url),
+                "username": username,
+                "password": password,
+            },
+        )
+
+        mfa_detect_url = password_request.url
+        mfa_detect_request = self.s.post(
+            mfa_detect_url,
+            data={
+                "state": extract_state(mfa_detect_url),
+                "action": "default",
+                "js-available": "false",
+                "webauthn-available": "true",
+                " is-brave": "false",
+                "webauthn-platform-available": "false",
+            },
+        )
+
+        mfa_url = mfa_detect_request.url
 
         # Detect invalid username or password error
         # If the username and password are correct, we should be
         # redirected to /u/mfa-otp-challenge.
         # If we are still on /u/login/password, then the username and
         # password are probably invalid.
-        if self.page.url.startswith("https://login.logicly.com.au/u/login/password"):
-            logging.debug(f"{self.page.url=}")
-            error_message = self.page.locator(
+        if mfa_url.startswith("https://login.logicly.com.au/u/login/password"):
+            logging.debug("Got password URL instead of expected MFA URL:")
+            logging.debug(f"{mfa_url}")
+            error_soup = BeautifulSoup(password_request.text, "html.parser")
+            error_message = error_soup.select_one(
                 'span[id="error-element-password"]'
-            ).inner_text()
+            ).get_text()
             raise InvalidPmhcUser(
-                "Did not reach expected OTP page. Error message:\n" f"{error_message}"
+                f"Did not reach expected OTP page. Error message:\n{error_message}"
             )
-
-        # Wait for MFA page to appear.
-        self.page.wait_for_url("https://login.logicly.com.au/u/mfa-otp-challenge*")
 
         # Note: We get the code _after_ loading the page and entering
         # the username and password, to ensure that it is still valid
@@ -214,23 +242,16 @@ class PMHC:
                     )
                 )
 
-        mfa_field = self.page.locator('input[id="code"]')
-        mfa_field.fill(totp_code)
-        mfa_field.press("Enter")
-        self.page.wait_for_load_state()
-
-        # Skip fingerprint/face recognition enrollment
-        # TODO: Only do this if we are actually on this page.
-        if self.page.url.startswith(
-            "https://login.logicly.com.au/u/mfa-webauthn-platform-enrollment"
-        ):
-            logging.info("Skipping fingerprint/face recognition enrollment")
-            skip_button = self.page.locator('button[value="refuse-add-device"]')
-            skip_button.click()
-            self.page.wait_for_load_state()
+        mfa_request = self.s.post(
+            mfa_url,
+            data={
+                "state": extract_state(mfa_url),
+                "code": totp_code,
+            },
+        )
 
         # confirm login was successful
-        user_query = self.page.request.get("https://pmhc-mds.net/api/current-user")
+        user_query = self.s.get("https://pmhc-mds.net/api/current-user")
         self.user_info = user_query.json()
 
         # error key will be present if login was unsuccessful
@@ -248,8 +269,8 @@ class PMHC:
         """Uploads a user specified file to PMHC website.
 
         Args:
-            input_file: Path to the file e.g. `'cc9dd7b5.csv'`
-                e.g. `'PMHC_MDS_20230101_20230131.xlsx'`
+            input_file: Path to the file e.g.
+                `'PMHC_MDS_20230101_20230131.xlsx'`
             test: Upload in 'test' or 'live' mode? Defaults to `True`
                 ('test'). Use `False` ('live') with care!
 
@@ -284,19 +305,19 @@ class PMHC:
             f"Uploading '{input_file}' to PMHC as a '{mode}' file\n"
             "It usually takes approx 3-10 minutes for PMHC to process xlsx files "
             "depending on the number of months included in the data, less for zipped "
-            "csv files (e.g. round 2 onward)"
+            "csv files"
         )
 
         # First PUT the file and receive a uuid
         with open(input_file, "rb") as file:
-            upload_response = self.page.request.put(
+            upload_response = self.s.put(
                 "https://uploader.strategicdata.com.au/upload",
-                multipart={
-                    "file": {
-                        "name": input_file.name,
-                        "mimeType": mimetypes.guess_type(input_file)[0],
-                        "buffer": file.read(),
-                    }
+                files={
+                    "file": (
+                        input_file.name,  # file name
+                        file,  # file object
+                        mimetypes.guess_type(input_file)[0],  # content type
+                    )
                 },
             )
 
@@ -308,9 +329,9 @@ class PMHC:
 
         # Second POST the upload details
         # This is required to register the upload with the PMHC portal
-        post_response = self.page.request.post(
+        post_response = self.s.post(
             f"https://pmhc-mds.net/api/organisations/{self.organisation_path}/uploads",
-            data={
+            json={
                 "uuid": uuid,
                 "filename": input_file.name,
                 "test": test,
@@ -319,7 +340,7 @@ class PMHC:
         )
         logging.info("Upload details POST response:")
         logging.info(post_response)
-        logging.info(post_response.text())
+        logging.info(post_response.text)
 
         return uuid
 
@@ -354,18 +375,14 @@ class PMHC:
         """
 
         url = f"https://pmhc-mds.net/api/organisations/{self.organisation_path}/uploads/{uuid}"
-        upload_errors_json = self.page.request.get(url)
+        upload_errors_json = self.s.get(url)
 
         download_folder.mkdir(parents=True, exist_ok=True)
         filename = download_folder / f"{uuid}.json"
         with open(filename, "wb") as file:
-            file.write(upload_errors_json.body())
+            file.write(upload_errors_json.content)
 
         logging.info(f"Saved JSON file to disk: '{filename}'")
-
-        # Remove download body from memory. Otherwise it will stay in
-        # memory so long as the PMHC class is in use.
-        upload_errors_json.dispose()
 
         return filename
 
@@ -377,11 +394,17 @@ class PMHC:
         Returns:
             `True` if an upload is currently processing, otherwise `False`.
         """
-        # Get a list of all this user's 'test' uploads ('processing', 'complete'
+        # Get a list of all this user's uploads ('processing', 'complete'
         # and 'error' status)
-        pmhc_username = self.user_info["username"]
-        json_list = self.page.request.get(
-            f"https://pmhc-mds.net/api/uploads?username={pmhc_username}&sort=-date"
+        # The filter parameter only accepts 'name', not 'username' or 'email'
+        # This is not ideal, as if there is another user with the same name,
+        # uploading at the same time, then you will be blocked from uploading
+        # until their upload completes. But this seems to be the best we can
+        # do within the limits of the unofficial PMHC Portal API.
+        pmhc_name = self.user_info["name"]
+        json_list = self.s.get(
+            f"https://pmhc-mds.net/api/uploads?name={pmhc_name}&sort=-date",
+            headers={"Range": "0-19"},
         ).json()
         # see if any are in a 'processing' state
         for json in json_list:
@@ -391,7 +414,7 @@ class PMHC:
         # all ok, none are processing, we are free to now upload a new file
         return False
 
-    def wait_for_extract(self, uuid: str, max_retries: int) -> bool:
+    def wait_for_extract(self, uuid: str, max_retries: int = 20) -> bool:
         """Wait for an extract with given uuid to have status
         'Completed'.
 
@@ -430,36 +453,164 @@ class PMHC:
         If Error, the extract has failed. Exit.
         """
         retries = 0
-        while retries <= max_retries:
+        while retries < max_retries:
+            logging.info(f"wait_for_extract: attempt: {retries}")
             time.sleep(30)
             try:
-                extracts_request = self.page.request.get(
+                extracts_request = self.s.get(
                     "https://pmhc-mds.net/api/extract?sort=-date"
                 )
-            except playwright.sync_api.Error as err:
-                if "Request timed out" in err.message:
-                    retries += 1
-                    logging.warning(
-                        f"Request timed out ({retries} of {max_retries}). Retrying."
-                    )
-                else:
-                    raise err
 
-            extracts = extracts_request.json()
-            extract = next(filter(lambda item: item.get("uuid") == uuid, extracts))
-            status = extract["status"]
+                extracts = extracts_request.json()
+                extract = next(filter(lambda item: item.get("uuid") == uuid, extracts))
+                status = extract["status"]
 
-            if status == "Completed":
-                break
-            if status == "Error":
-                logging.error(f"PMHC extract with uuid {uuid} has failed.")
-                logging.error("See PMHC Server error:")
-                logging.error(extract["stash"]["error"])
-                raise PmhcServerError("The PMHC extract has failed on the server.")
+                if status == "Completed":
+                    return True
+                if status == "Error":
+                    logging.error(f"PMHC extract with uuid {uuid} has failed.")
+                    logging.error("See PMHC Server error:")
+                    logging.error(extract["stash"]["error"])
+                    raise PmhcServerError("The PMHC extract has failed on the server.")
+
+            except (requests.ReadTimeout, requests.ConnectionError) as err:
+                retries += 1
+                logging.warning(err)
+                logging.warning(
+                    f"Request timed out ({retries} of {max_retries}). Retrying."
+                )
+
         else:
             raise MaxRetriesExceeded(
-                f"Tried fetching PMHC extract list {retries - 1} times"
+                f"Tried fetching PMHC extract list {retries} times"
             )
+
+    def download_extract_request(
+        self,
+        start_date: date = date.today() - timedelta(days=30),
+        end_date: date = date.today(),
+        organisation_path: Optional[str] = None,
+        specification: PMHCSpecification = PMHCSpecification.PMHC,
+        without_associated_dates: bool = False,
+        matched_episodes: bool = False,
+        max_retries: int = 20,
+        **kwargs,
+    ) -> Path:
+        """Extract PMHC MDS Data within the date range. If no date range
+        is given, `start_date` defaults to 30 days before the current
+        date and `end_date` defaults to the current date.
+
+        Returns a requests.Response object for the generated data
+        extract. This enables you to use any of the supported
+        requests.Response methods, rather than simply downloading to a
+        local file. (If you want to just download to a local file, use
+        the download_pmhc_mds() method.)
+
+        Args:
+            start_date: start date for extract
+            end_date: end date for extract (default: today)
+            organisation_path: Organisation path for downloaded extract.
+                Defaults to your organisation as specified when
+                initialising `pmhclib.PMHC`. However, can be a different
+                organisation, for example if you are a PHN, but only
+                want to download data for a single provider
+                organisation.
+            specification: Specification for extract. (default:
+                `PMHCSpecification.PMHC`, which returns data from the
+                current PMHC specification.)
+            without_associated_dates: Enable extract option
+                "Include data without associated dates"
+            matched_episodes: Enable extract option
+                "Include all data associated with matched episodes"
+            max_retries: Number of times to retry after timeout when
+                waiting for extract to be generated by PMHC website.
+            kwargs: Additional arguments passed through to
+                requests.get()
+
+        Returns:
+            requests.Response
+
+        Examples:
+
+            Stream download to disk, avoiding excessive RAM usage.
+
+            >>> with PMHC("PHN105") as pmhc:
+            ...     pmhc.login()
+            ...     r = pmhc.download_extract_request(stream=True)
+            ...     with open('extract.zip', 'wb') as file:
+            ...         for content in r.iter_content(chunk_size=65536):
+            ...             file.write(content)
+        """
+
+        if organisation_path is None:
+            organisation_path = self.organisation_path
+
+        # Queue download from PMHC
+        logging.info("Queuing extract...")
+        params = {
+            "organisation_path": f"{organisation_path}",
+            "encoded_organisation_path": f"{organisation_path}",
+            "file_type": "csv",
+            "start_date": f"{start_date:%Y-%m-%d}",
+            "end_date": f"{end_date:%Y-%m-%d}",
+            # These need to be interpreted as a JS boolean
+            # (true or 1, rather than True).
+            "childless": int(without_associated_dates),
+            "all_episode_children": int(matched_episodes),
+            "spec_type": specification.term,
+        }
+
+        download_request = self.s.get(
+            "https://pmhc-mds.net/api/extract/csv",
+            params=params,
+        )
+        download_response = download_request.json()
+        try:
+            download_uuid = download_response["uuid"]
+        except KeyError as err:
+            progress.stop()
+            logging.error("Could not find uuid in the following JSON:")
+            logging.error(download_response)
+            logging.error(
+                "Ensure your PMHC user has the 'Reporting' role and you have\n"
+                "set the correct organisation_path."
+            )
+            raise err
+
+        # Wait for extract to be ready
+        logging.info("Waiting for extract...")
+        self.wait_for_extract(download_uuid, max_retries)
+
+        # We know the URL which will give us the final download URL,
+        # as we have the uuid. We have confirmed above that the
+        # extract is completed.
+        retries = 0
+        while retries < max_retries:
+            try:
+                download_url_request = self.s.get(
+                    f"https://pmhc-mds.net/api/extract/{download_uuid}/fetch"
+                )
+                # Successful status codes are between 200 and 299
+                if 200 <= download_url_request.status_code <= 299:
+                    break
+            except (requests.ReadTimeout, requests.ConnectionError) as err:
+                retries += 1
+                logging.warning(err)
+                logging.warning(
+                    f"Request timed out ({retries} of {max_retries}). Retrying."
+                )
+
+            # Wait before retrying
+            time.sleep(30)
+
+        else:
+            raise MaxRetriesExceeded(f"Tried fetching PMHC extract {retries} times.")
+
+        download_url_json = download_url_request.json()
+        download_url = download_url_json["location"]
+
+        logging.info("Downloading extract...")
+        return self.s.get(download_url, **kwargs)
 
     def download_pmhc_mds(
         self,
@@ -475,6 +626,9 @@ class PMHC:
         """Extract PMHC MDS Data within the date range. If no date range
         is given, `start_date` defaults to 30 days before the current
         date and `end_date` defaults to the current date.
+
+        If you just want the raw requests.Response object, use the
+        download_extract_request() method.
 
         Args:
             output_directory: directory to save download
@@ -500,89 +654,22 @@ class PMHC:
             Path to downloaded extract.
         """
 
-        if organisation_path is None:
-            organisation_path = self.organisation_path
+        output_file = output_directory / f"pmhc_extract_{start_date}_{end_date}.zip"
+        logging.info(f"Saving output to {output_file}")
 
-        # Wait for queued download to be processed
-        with Progress(*Progress.get_default_columns(), TimeElapsedColumn()) as progress:
-            extract_task = progress.add_task("Checking for PMHC extract...", total=None)
+        r = self.download_extract_request(
+            start_date=start_date,
+            end_date=end_date,
+            organisation_path=organisation_path,
+            specification=specification,
+            without_associated_dates=without_associated_dates,
+            matched_episodes=matched_episodes,
+            max_retries=max_retries,
+            stream=True,
+        )
 
-            # Queue download from PMHC
-            progress.update(extract_task, description="Queuing extract...")
-            params = {
-                "organisation_path": f"{organisation_path}",
-                "encoded_organisation_path": f"{organisation_path}",
-                "file_type": "csv",
-                "start_date": f"{start_date:%Y-%m-%d}",
-                "end_date": f"{end_date:%Y-%m-%d}",
-                # These need to be interpreted as a JS boolean
-                # (true or 1, rather than True).
-                "childless": int(without_associated_dates),
-                "all_episode_children": int(matched_episodes),
-                "spec_type": specification.term,
-            }
+        with open(output_file, "wb") as fp:
+            for content in r.iter_content(chunk_size=65536):
+                fp.write(content)
 
-            download_request = self.page.request.get(
-                "https://pmhc-mds.net/api/extract/csv",
-                params=params,
-            )
-            download_response = download_request.json()
-            try:
-                download_uuid = download_response["uuid"]
-            except KeyError as err:
-                progress.stop()
-                logging.error("Could not find uuid in the following JSON:")
-                logging.error(download_response)
-                logging.error(
-                    "Ensure your PMHC user has the 'Reporting' role and you have\n"
-                    "set the correct organisation_path."
-                )
-                raise err
-
-            # Wait for extract to be ready
-            progress.update(extract_task, description="Waiting for extract...")
-            self.wait_for_extract(download_uuid, max_retries)
-
-            # We know the URL which will give us the final download URL,
-            # as we have the uuid. We have confirmed above that the
-            # extract is completed.
-            retries = 0
-            while retries <= max_retries:
-                try:
-                    download_url_request = self.page.request.get(
-                        f"https://pmhc-mds.net/api/extract/{download_uuid}/fetch"
-                    )
-                    if download_url_request.ok:
-                        break
-                except playwright.sync_api.Error as err:
-                    if "Request timed out" in err.message:
-                        retries += 1
-                        logging.warning(
-                            f"Request timed out ({retries} of {max_retries}). Retrying."
-                        )
-                    else:
-                        raise err
-
-                # Wait before retrying
-                time.sleep(30)
-
-            else:
-                raise MaxRetriesExceeded(
-                    f"Tried fetching PMHC extract {retries - 1} times."
-                )
-
-            download_url_json = download_url_request.json()
-            download_url = download_url_json["location"]
-
-            progress.update(extract_task, description="Downloading extract...")
-            download = self.page.request.get(download_url)
-            output_file = output_directory / f"pmhc_extract_{start_date}_{end_date}.zip"
-            logging.info(f"Saving output to {output_file}")
-            with open(output_file, "wb") as fp:
-                fp.write(download.body())
-
-            # Remove download body from memory. Otherwise it will stay
-            # in memory so long as the PMHC class is in use.
-            download.dispose()
-
-            return output_file
+        return output_file
