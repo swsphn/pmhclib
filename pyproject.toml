@@ -1,19 +1,25 @@
-[tool.poetry]
+[project]
 name = "pmhclib"
-version = "0.9.0"
-description = "Python wrapper for unofficial PMHC MDS portal API"
 authors = [
-    "David Wales <david.wales@swsphn.com.au>",
-    "Jonathan Stucken <jonathan.stucken@swsphn.com.au>"
+    {name = "David Wales", email = "david.wales@swsphn.com.au"},
+    {name = "Jonathan Stucken", email = "jonathan.stucken@swsphn.com.au"},
 ]
+version = "0.9.0.post1"
+description = "Python wrapper for unofficial PMHC MDS portal API"
 readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+dependencies = [
+    "rich (>=13.9.4,<14.0.0)",
+    "pyotp (>=2.9.0,<3.0.0)",
+    "requests (>=2.32.3,<3.0.0)",
+    "beautifulsoup4 (>=4.12.3,<5.0.0)",
+]
 
-[tool.poetry.dependencies]
-python = ">=3.10"
-rich = "^13.9.4"
-pyotp = "^2.9.0"
-requests = "^2.32.3"
-beautifulsoup4 = "^4.12.3"
+[project.urls]
+Repository = "https://github.com/swsphn/pmhclib"
+documentation = "https://swsphn.github.io/pmhclib/"
+"Bug Tracker" = "https://github.com/swsphn/pmhclib/issues"
 
 [tool.poetry.group.docs.dependencies]
 sphinx = "^7.0.0"
