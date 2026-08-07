@@ -4,7 +4,7 @@ authors = [
     {name = "David Wales", email = "david.wales@swsphn.com.au"},
     {name = "Jonathan Stucken", email = "jonathan.stucken@swsphn.com.au"},
 ]
-version = "0.9.0.post1"
+version = "0.9.0.post2"
 description = "Python wrapper for unofficial PMHC MDS portal API"
 readme = "README.md"
 license = "MIT"

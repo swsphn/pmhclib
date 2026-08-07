@@ -1,5 +1,7 @@
 # pmhclib
 
+![PyPI Version](https://img.shields.io/pypi/v/pmhclib?color=green)
+
 pmhclib is a Python wrapper for the unofficial PMHC MDS portal API. You
 can use it to automate uploads and downloads to the PMHC portal.
 
@@ -9,17 +11,16 @@ can use it to automate uploads and downloads to the PMHC portal.
 it directly with `pip` or `poetry`:
 
 ``` sh
-pip install pmhclib@git+https://github.com/swsphn/pmhclib.git
+pip install pmhclib
 ```
 
 OR
 
 ``` sh
-poetry add pmhclib@git+https://github.com/swsphn/pmhclib.git
+poetry add pmhclib
 ```
 
 This will install `pmhclib` as an importable Python library.
-
 
 ## Usage
 
