@@ -265,7 +265,7 @@ class PMHC:
         self,
         input_file: Path,
         test: bool = True,
-    ) -> Path:
+    ) -> str:
         """Uploads a user specified file to PMHC website.
 
         Args:
@@ -279,7 +279,7 @@ class PMHC:
             FileNotFoundException: If we cannot find user file
 
         Returns:
-            Filename of the new file we generated for matching purposes
+            upload UUID
         """
 
         # check file looks ok
