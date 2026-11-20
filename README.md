@@ -126,6 +126,19 @@ cd docs
 
 The generated documentation can be viewed at `docs/_build/html/index.html`.
 
+## Contributing
+
+### Update GitHub Actions dependencies
+
+To upgrade GitHub Actions dependencies, use [pinact][] as follows:
+
+    pinact run --min-age 14 --update
+
+We guard against supply-chain attacks by only upgrading to dependency
+versions at least 14 days old, and freezing the versions to commit
+hashes.
+
 [Sphinx]: https://www.sphinx-doc.org/
 [docs]: https://swsphn.github.io/pmhclib/
 [mfa-apps]: https://datawiki.swsphn.com.au/software/gui-tools/multi-factor-authentication-apps/
+[pinact]: https://github.com/suzuki-shunsuke/pinact/
